@@ -90,9 +90,23 @@ func (c *Client) Stream(ctx context.Context, msgs []Msg, onDelta func(string)) e
 	return sc.Err()
 }
 
+// CompleteWith is Complete with an explicit temperature and max_tokens (for the
+// long A–G report generation). maxTokens<=0 omits the cap.
+func (c *Client) CompleteWith(ctx context.Context, msgs []Msg, temperature float64, maxTokens int) (string, error) {
+	req := map[string]any{"model": c.Model, "messages": msgs, "stream": false, "temperature": temperature}
+	if maxTokens > 0 {
+		req["max_tokens"] = maxTokens
+	}
+	return c.complete(ctx, req)
+}
+
 // Complete sends messages and returns the full assistant reply (non-streaming).
 func (c *Client) Complete(ctx context.Context, msgs []Msg) (string, error) {
-	body, _ := json.Marshal(map[string]any{"model": c.Model, "messages": msgs, "stream": false})
+	return c.complete(ctx, map[string]any{"model": c.Model, "messages": msgs, "stream": false})
+}
+
+func (c *Client) complete(ctx context.Context, reqBody map[string]any) (string, error) {
+	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err

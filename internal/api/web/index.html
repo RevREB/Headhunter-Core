@@ -165,6 +165,20 @@
   .pf-row label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .12rem; }
   .pf-row .d { color: var(--muted); font-size: .76rem; margin-bottom: .25rem; }
   .pf { width: 100%; font: inherit; resize: vertical; }
+  /* rendered A–G report */
+  .report h1 { font: 400 1.35rem var(--serif); margin: .3rem 0 .5rem; }
+  .report h2 { font-size: 1rem; border-bottom: 1px solid var(--line); padding-bottom: .2rem; margin: 1.2rem 0 .5rem; color: var(--accent); }
+  .report h3 { font-size: .92rem; margin: .9rem 0 .3rem; }
+  .report h4 { font-size: .85rem; margin: .7rem 0 .25rem; color: var(--muted); }
+  .report ul { margin: .3rem 0 .6rem 1.1rem; padding: 0; }
+  .report li { margin: .15rem 0; }
+  .report p { margin: .45rem 0; }
+  .report a { color: var(--accent); }
+  .twrap { overflow-x: auto; margin: .6rem 0; }
+  table.md { width: 100%; border-collapse: collapse; font-size: .84rem; }
+  table.md th, table.md td { border: 1px solid var(--line); padding: .35rem .5rem; text-align: left; vertical-align: top; }
+  table.md th { background: var(--panel2); font-weight: 600; }
+  .report code, .prose code { background: var(--chip); padding: .05rem .3rem; border-radius: 4px; font-size: .85em; }
 </style>
 
 <aside>
@@ -344,20 +358,35 @@
   const date = d => d ? d.slice(0,10) : "";
 
   function mdToHtml(md){
-    const lines = String(md||"").split("\n"); let html=""; let inList=false;
-    const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
-    for (let raw of lines){
-      const l = raw.replace(/\s+$/,"");
+    const lines = String(md||"").split("\n");
+    const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    const cells = row => row.replace(/^\s*\|/,"").replace(/\|\s*$/,"").split("|").map(c=>c.trim());
+    let html="", i=0, inList=false;
+    const closeList=()=>{ if(inList){html+="</ul>";inList=false;} };
+    while (i < lines.length){
+      const l = lines[i].replace(/\s+$/,"");
+      // GFM table: a pipe row followed by a |---|---| separator
+      if (/^\s*\|.*\|\s*$/.test(l) && i+1<lines.length && /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[i+1])){
+        closeList();
+        const head = cells(l); i += 2; let body="";
+        while (i<lines.length && /\|/.test(lines[i]) && lines[i].trim()!==""){
+          const c = cells(lines[i].replace(/\s+$/,""));
+          body += "<tr>"+c.map(x=>"<td>"+inline(x)+"</td>").join("")+"</tr>"; i++;
+        }
+        html += '<div class="twrap"><table class="md"><thead><tr>'+head.map(x=>"<th>"+inline(x)+"</th>").join("")+"</tr></thead><tbody>"+body+"</tbody></table></div>";
+        continue;
+      }
       const m = l.match(/^(\s*)-\s+(.*)/);
-      if (m){ if(!inList){html+="<ul>";inList=true;} html+="<li>"+inline(m[2])+"</li>"; continue; }
-      if (inList){ html+="</ul>"; inList=false; }
-      if (/^###\s/.test(l)) html+="<h3>"+inline(l.slice(4))+"</h3>";
+      if (m){ if(!inList){html+="<ul>";inList=true;} html+="<li>"+inline(m[2])+"</li>"; i++; continue; }
+      closeList();
+      if (/^####\s/.test(l)) html+="<h4>"+inline(l.slice(5))+"</h4>";
+      else if (/^###\s/.test(l)) html+="<h3>"+inline(l.slice(4))+"</h3>";
       else if (/^##\s/.test(l)) html+="<h2>"+inline(l.slice(3))+"</h2>";
       else if (/^#\s/.test(l)) html+="<h1>"+inline(l.slice(2))+"</h1>";
-      else if (l.trim()==="") html+="";
-      else html+="<p>"+inline(l)+"</p>";
+      else if (l.trim()!=="") html+="<p>"+inline(l)+"</p>";
+      i++;
     }
-    if (inList) html+="</ul>";
+    closeList();
     return html;
   }
 
@@ -494,9 +523,18 @@
     if (d.url) acts.push(`<a class="btn" href="${esc(d.url)}" target="_blank" rel="noopener">Open posting ↗</a>`);
 
     let reportHtml = "";
-    if (report){
+    if (report && report.markdown){
+      const sm = report.summary || {};
+      const badges = [];
+      if (sm.decision) badges.push(`<span class="pill ${sm.decision==='hard_stop'?'rejected':'evaluated'}">${esc(String(sm.decision).replace(/_/g,' '))}</span>`);
+      if (sm.legitimacy_tier) badges.push(`<span class="pill">legitimacy: ${esc(String(sm.legitimacy_tier).replace(/_/g,' '))}</span>`);
+      if (sm.confidence) badges.push(`<span class="pill">confidence: ${esc(sm.confidence)}</span>`);
+      if (sm.onsite_exception) badges.push(`<span class="pill interview">★ onsite exception: ${esc(sm.onsite_exception)}</span>`);
+      if (Array.isArray(sm.hard_stops)) sm.hard_stops.forEach(h=>badges.push(`<span class="pill rejected" title="${esc(h.evidence||'')}">⛔ ${esc(String(h.reason_code||'').replace(/_/g,' '))}</span>`));
+      reportHtml = `${badges.length?`<div class="chips" style="margin:.2rem 0 1rem">${badges.join("")}</div>`:""}<div class="card pad report">${mdToHtml(report.markdown)}</div>`;
+    } else if (report && (report.verdict || report.strengths)){
       reportHtml = `<div class="card pad">
-        <h2 class="sec" style="margin-top:0">Evaluation${report.score!=null?` <span class="hint">score ${Number(report.score).toFixed(1)}</span>`:""}</h2>
+        <h2 class="sec" style="margin-top:0">Evaluation <span class="hint">interim — pending A–G re-eval</span></h2>
         ${report.verdict?`<p>${esc(report.verdict)}</p>`:""}
         ${jobList("Strengths", report.strengths)}
         ${jobList("Concerns", report.concerns)}
