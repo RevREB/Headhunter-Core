@@ -251,6 +251,18 @@
         <input class="grow" id="q" placeholder="Search company or role…" style="max-width:17rem">
       </div>
     </div>
+    <div class="card pad" id="sweep-panel" style="margin-bottom:.8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <b>A–G sweep</b>
+      <select id="sweep-scope" style="max-width:15rem">
+        <option value="inbox">Inbox (unevaluated)</option>
+        <option value="evaluated">Re-evaluate evaluated</option>
+        <option value="all">All (inbox + evaluated)</option>
+      </select>
+      <button class="btn go" id="sweep-start">⚡ Start sweep</button>
+      <button class="btn ghost" id="sweep-stop" style="display:none">Stop</button>
+      <span class="hint" id="sweep-line" style="color:var(--muted);margin-left:auto"></span>
+      <div class="bar" id="sweep-bar" style="flex-basis:100%;display:none;margin-top:.2rem"><i style="width:0%"></i></div>
+    </div>
     <div class="tabs" id="pipe-tabs"></div>
     <div class="scroll"><table>
       <thead><tr>
@@ -323,6 +335,8 @@
     <h2 class="sec">Appearance</h2>
     <div class="card"><div class="row"><div class="who"><div class="co">Company logos</div><div class="ro">Show each company's real logo, cached on disk. Off = colored monograms.</div></div>
       <div class="toggle on" id="cfg-logos"><i></i></div></div></div>
+    <h2 class="sec">Evaluation</h2>
+    <div class="card pad"><div class="fld"><label>Sweep concurrency</label><div class="d">how many A–G evaluations run in parallel (1–20)</div><input type="number" min="1" max="20" id="cfg-concurrency"></div></div>
     <h2 class="sec">Follow-up cadence <span class="hint">days — the same values the engine uses</span></h2>
     <div class="card pad"><div class="form2" id="cadence"></div>
       <div style="margin-top:1rem"><button class="btn go" id="cfg-save">Save config</button> <span class="hint" id="cfg-saved" style="color:var(--muted)"></span></div>
@@ -405,6 +419,7 @@
       document.getElementById("foot-count").textContent = ALL.length.toLocaleString();
       renderAll();
       renderScanStatus();
+      pollSweep();
     } catch (e) { document.querySelectorAll(".empty").forEach(el=>el.textContent = "core unavailable: "+e); }
   }
 
@@ -579,6 +594,27 @@
   }
   window.hhChip = (k,i)=>{ explore[k].splice(i,1); renderExplore(); };
   window.hhWin = w=>{ explore.window=w; renderExplore(); };
+  let sweepTimer=null, sweepWasRunning=false;
+  function fmtDur(s){ s=Math.max(0,s|0); if(s<60) return s+"s"; if(s<3600) return Math.floor(s/60)+"m"; return Math.floor(s/3600)+"h"+Math.floor((s%3600)/60)+"m"; }
+  async function pollSweep(){
+    clearTimeout(sweepTimer); sweepTimer=null;
+    const line=document.getElementById("sweep-line"); if(!line) return;
+    const bar=document.getElementById("sweep-bar"), startB=document.getElementById("sweep-start"), stopB=document.getElementById("sweep-stop");
+    let s; try{ s=await fetch("/api/evaluate/status").then(r=>r.json()); }catch(e){ return; }
+    if(s.running){
+      sweepWasRunning=true;
+      const pct=s.total?Math.round(s.processed/s.total*100):0;
+      line.textContent=`${s.scope}: ${s.processed}/${s.total} · ✓${s.evaluated} ✗${s.failed} · ${pct}%${s.etaSec!=null?" · ETA "+fmtDur(s.etaSec):""}`;
+      bar.style.display="block"; bar.firstElementChild.style.width=pct+"%";
+      startB.disabled=true; stopB.style.display="";
+      sweepTimer=setTimeout(pollSweep,3000);
+    } else {
+      startB.disabled=false; stopB.style.display="none";
+      if(s.total>0){ const pct=s.total?Math.round(s.processed/s.total*100):100; line.textContent=`last sweep: ✓${s.evaluated} scored, ✗${s.failed} failed (${s.processed}/${s.total})`; bar.style.display="block"; bar.firstElementChild.style.width=pct+"%"; }
+      else { line.textContent=""; bar.style.display="none"; }
+      if(sweepWasRunning){ sweepWasRunning=false; load(); }
+    }
+  }
   function relTime(iso){ const t=new Date(iso); if(isNaN(t)) return iso; const s=Math.floor((Date.now()-t)/1000); if(s<60) return s+"s ago"; if(s<3600) return Math.floor(s/60)+"m ago"; if(s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; }
   async function renderScanStatus(){
     const line=document.getElementById("scan-status-line"), box=document.getElementById("scan-jobs");
@@ -596,6 +632,7 @@
   }
   function renderConfig() {
     document.getElementById("cadence").innerHTML = CAD.map(c=>`<div class="fld"><label>${c[1]}</label><div class="d">${c[2]}</div><input type="number" min="0" id="cad-${c[0]}" value="${cadence[c[0]]}"></div>`).join("");
+    const cc=document.getElementById("cfg-concurrency"); if(cc) cc.value = (CONFIG.eval_concurrency!=null ? CONFIG.eval_concurrency : 6);
   }
   // Profile: the search criteria the evaluator reads, plus the résumé. Field
   // values live in config['profile'] (a JSON object) — never in this source.
@@ -652,7 +689,11 @@
   document.getElementById("scan-refresh").onclick = renderScanStatus;
   document.getElementById("portal-check").onclick = e => { e.target.disabled=true; e.target.textContent="Checking…"; SOURCES.forEach((s,i)=>setTimeout(()=>{const el=document.getElementById("ph-"+s); if(el){el.textContent="reachable";el.style.color="var(--good)";}}, 300*(i+1))); setTimeout(()=>{e.target.disabled=false;e.target.textContent="◎ Check portal health";},300*SOURCES.length+300); };
   document.getElementById("cfg-logos").onclick = e => e.currentTarget.classList.toggle("on");
-  document.getElementById("cfg-save").onclick = () => { CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value)); saveConfig("cadence", cadence, document.getElementById("cfg-saved")); };
+  document.getElementById("cfg-save").onclick = () => {
+    CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value));
+    saveConfig("cadence", cadence, document.getElementById("cfg-saved"));
+    saveConfig("eval_concurrency", Math.max(1, Math.min(20, Number(document.getElementById("cfg-concurrency").value)||6)), null);
+  };
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
   document.getElementById("profile-save").onclick = async e => {
     const obj = {};
@@ -674,6 +715,12 @@
     } catch (err) { btn.textContent = "error"; }
     setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 3500);
   };
+  document.getElementById("sweep-start").onclick = async () => {
+    const scope = document.getElementById("sweep-scope").value;
+    try { const r = await fetch("/api/evaluate/sweep?scope="+scope, {method:"POST"}); if(!r.ok){ const d=await r.json().catch(()=>({})); document.getElementById("sweep-line").textContent = d.error||"failed to start"; return; } } catch(e){ return; }
+    pollSweep();
+  };
+  document.getElementById("sweep-stop").onclick = async () => { try { await fetch("/api/evaluate/stop", {method:"POST"}); } catch(e){}; setTimeout(pollSweep, 400); };
   document.getElementById("q").addEventListener("input", renderPipe);
   document.querySelectorAll("#view-pipeline th.sortable").forEach(th => th.addEventListener("click", () => {
     const c = th.dataset.sort;
@@ -739,6 +786,7 @@
     document.getElementById("view-"+v)?.classList.add("active");
     document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.view===v));
     if (v === "explore") renderScanStatus();
+    if (v === "pipeline") pollSweep();
   }
   window.addEventListener("hashchange", route);
   route(); load();

@@ -45,11 +45,92 @@ type Server struct {
 	Analytics *analytics.Analytics
 	LLM       *llm.Client
 	Operator  Cycler
+	sweep     *sweepState
+}
+
+// sweepState tracks the background A–G evaluation sweep so it can be started,
+// polled, and stopped via the API without a held request connection.
+type sweepState struct {
+	mu        sync.Mutex
+	running   bool
+	scope     string
+	workers   int
+	total     int
+	processed int
+	evaluated int
+	failed    int
+	startedAt time.Time
+	stop      bool
+}
+
+func (ss *sweepState) snapshot() map[string]any {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	m := map[string]any{
+		"running": ss.running, "scope": ss.scope, "workers": ss.workers,
+		"total": ss.total, "processed": ss.processed, "evaluated": ss.evaluated, "failed": ss.failed,
+	}
+	if !ss.startedAt.IsZero() {
+		m["startedAt"] = ss.startedAt.UTC().Format(time.RFC3339)
+		elapsed := int(time.Since(ss.startedAt).Seconds())
+		m["elapsedSec"] = elapsed
+		if ss.processed > 0 && ss.running {
+			per := float64(elapsed) / float64(ss.processed)
+			m["etaSec"] = int(per * float64(ss.total-ss.processed))
+		}
+	}
+	return m
 }
 
 // New builds the API server.
 func New(st *store.Store, an *analytics.Analytics, l *llm.Client, op Cycler) *Server {
-	return &Server{Store: st, Analytics: an, LLM: l, Operator: op}
+	return &Server{Store: st, Analytics: an, LLM: l, Operator: op, sweep: &sweepState{}}
+}
+
+// evalContext loads the CV + profile once for a run (CV capped for token budget).
+func (s *Server) evalContext(ctx context.Context) (cv, profileJSON string) {
+	profileJSON = "{}"
+	if cfg, err := s.Store.GetAllConfig(ctx); err == nil {
+		if raw, ok := cfg["cv"]; ok {
+			_ = json.Unmarshal(raw, &cv)
+		}
+		if raw, ok := cfg["profile"]; ok && len(raw) > 0 {
+			profileJSON = string(raw)
+		}
+	}
+	if len(cv) > 12000 {
+		cv = cv[:12000]
+	}
+	return cv, profileJSON
+}
+
+// evalConcurrency reads the worker count from config['eval_concurrency'], then
+// EVAL_CONCURRENCY, default 6, capped at 20. An explicit override wins if >0.
+func (s *Server) evalConcurrency(ctx context.Context, override int) int {
+	n := 6
+	if cfg, err := s.Store.GetAllConfig(ctx); err == nil {
+		if raw, ok := cfg["eval_concurrency"]; ok {
+			var v int
+			if json.Unmarshal(raw, &v) == nil && v > 0 {
+				n = v
+			}
+		}
+	}
+	if v := os.Getenv("EVAL_CONCURRENCY"); v != "" {
+		if k, err := strconv.Atoi(v); err == nil && k > 0 {
+			n = k
+		}
+	}
+	if override > 0 {
+		n = override
+	}
+	if n > 20 {
+		n = 20
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // Routes returns the HTTP handler.
@@ -69,6 +150,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/scan/status", s.scanStatus)
 	mux.HandleFunc("POST /api/scan/dedup", s.dedup)
 	mux.HandleFunc("POST /api/evaluate", s.evaluate)
+	mux.HandleFunc("POST /api/evaluate/sweep", s.sweepStart)
+	mux.HandleFunc("GET /api/evaluate/status", s.sweepStatus)
+	mux.HandleFunc("POST /api/evaluate/stop", s.sweepStop)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("GET /icon.png", s.icon)
 	mux.HandleFunc("GET /favicon.ico", s.icon)
@@ -122,6 +206,9 @@ func (s *Server) tools(w http.ResponseWriter, _ *http.Request) {
 		{Name: "cycle", Description: "Trigger a scan cycle (launches one Job per catalog scraper)", InputSchema: empty},
 		{Name: "scan_status", Description: "Scan status: last run + live state of the current scan Jobs", InputSchema: empty},
 		{Name: "dedup", Description: "Collapse inbox near-duplicates (dry run; ?apply=true to commit)", InputSchema: empty},
+		{Name: "eval_sweep", Description: "Start the A–G evaluation sweep (?scope=inbox|evaluated|all)", InputSchema: empty},
+		{Name: "eval_status", Description: "A–G sweep progress (running, processed/total, evaluated, failed, ETA)", InputSchema: empty},
+		{Name: "eval_stop", Description: "Stop the running A–G sweep", InputSchema: empty},
 	}})
 }
 
@@ -144,6 +231,12 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		s.scanStatus(w, r)
 	case "dedup":
 		s.dedup(w, r)
+	case "eval_sweep":
+		s.sweepStart(w, r)
+	case "eval_status":
+		s.sweepStatus(w, r)
+	case "eval_stop":
+		s.sweepStop(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown tool"})
 	}
@@ -458,6 +551,135 @@ const agMarker = "<!-- HEADHUNTER:MACHINE_SUMMARY v1 -->"
 // from the trailing machine-summary JSON, validates the hard-stop invariant, and
 // returns the score plus the stored report doc {markdown, summary}. Retries on
 // the gateway's intermittent empty/truncated body and on parse/validation fails.
+// sweepStart launches the background A–G sweep over a scope (inbox|evaluated|all)
+// and returns immediately. One sweep at a time.
+func (s *Server) sweepStart(w http.ResponseWriter, r *http.Request) {
+	if s.LLM == nil || s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "evaluator not configured (LLM or DB missing)"})
+		return
+	}
+	scope := r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "inbox"
+	}
+	var statuses []string
+	switch scope {
+	case "inbox":
+		statuses = []string{"inbox"}
+	case "evaluated":
+		statuses = []string{"evaluated"}
+	case "all":
+		statuses = []string{"inbox", "evaluated"}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be inbox|evaluated|all"})
+		return
+	}
+	// Claim the slot before the (slow) target query so two starts can't race.
+	s.sweep.mu.Lock()
+	if s.sweep.running {
+		s.sweep.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a sweep is already running"})
+		return
+	}
+	s.sweep.running = true
+	s.sweep.mu.Unlock()
+
+	var apps []store.Application
+	for _, st := range statuses {
+		a, err := s.Store.ListApplications(r.Context(), 100000, st)
+		if err != nil {
+			s.sweep.mu.Lock()
+			s.sweep.running = false
+			s.sweep.mu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		apps = append(apps, a...)
+	}
+	workers := s.evalConcurrency(r.Context(), 0)
+	if v := r.URL.Query().Get("workers"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			workers = s.evalConcurrency(r.Context(), n)
+		}
+	}
+	s.sweep.mu.Lock()
+	s.sweep.scope = scope
+	s.sweep.workers = workers
+	s.sweep.total = len(apps)
+	s.sweep.processed, s.sweep.evaluated, s.sweep.failed = 0, 0, 0
+	s.sweep.startedAt = time.Now()
+	s.sweep.stop = false
+	s.sweep.mu.Unlock()
+
+	go s.runSweep(apps, workers)
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "status": "started", "scope": scope, "total": len(apps), "workers": workers})
+}
+
+func (s *Server) sweepStatus(w http.ResponseWriter, _ *http.Request) {
+	m := s.sweep.snapshot()
+	m["ok"] = true
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) sweepStop(w http.ResponseWriter, _ *http.Request) {
+	s.sweep.mu.Lock()
+	running := s.sweep.running
+	if running {
+		s.sweep.stop = true
+	}
+	s.sweep.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stopping": running})
+}
+
+// runSweep evaluates apps in the background with a bounded worker pool, checking
+// the stop flag between dispatches. Uses context.Background so it outlives the
+// request that started it.
+func (s *Server) runSweep(apps []store.Application, workers int) {
+	defer func() {
+		s.sweep.mu.Lock()
+		s.sweep.running = false
+		s.sweep.mu.Unlock()
+	}()
+	ctx := context.Background()
+	cv, profileJSON := s.evalContext(ctx)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for _, a := range apps {
+		s.sweep.mu.Lock()
+		stop := s.sweep.stop
+		s.sweep.mu.Unlock()
+		if stop {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(a store.Application) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			doc, _ := s.Store.GetPostingDoc(ctx, a.ID)
+			score, report, err := s.evalOne(ctx, cv, profileJSON, a, doc)
+			ok := err == nil
+			if ok {
+				if e := s.Store.SaveEvaluation(ctx, a.ID, score, "evaluated", report); e != nil {
+					ok, err = false, e
+				}
+			}
+			s.sweep.mu.Lock()
+			s.sweep.processed++
+			if ok {
+				s.sweep.evaluated++
+			} else {
+				s.sweep.failed++
+			}
+			s.sweep.mu.Unlock()
+			if !ok {
+				log.Printf("sweep: app %d %s / %s: %v", a.ID, a.Company, a.Role, err)
+			}
+		}(a)
+	}
+	wg.Wait()
+}
+
 func (s *Server) evalOne(ctx context.Context, cv, profileJSON string, a store.Application, postingDoc json.RawMessage) (float64, json.RawMessage, error) {
 	var rp struct {
 		Title    string          `json:"title"`
