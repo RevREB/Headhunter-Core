@@ -1,7 +1,8 @@
-// Package api serves the MCP-shaped HTTP surface for Headhunter-Core.
+// Package api serves the MCP-shaped HTTP surface and the embedded web dashboard.
 package api
 
 import (
+	"embed"
 	"encoding/json"
 	"net/http"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/RevREB/Headhunter-Core/internal/store"
 	"github.com/RevREB/Headhunter-Core/pkg/scraper"
 )
+
+//go:embed web
+var webFS embed.FS
 
 // Server holds the API dependencies. Store/Analytics may be nil (health-only
 // degraded mode when DATABASE_URL is unset).
@@ -29,8 +33,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /api/tools", s.tools)
 	mux.HandleFunc("POST /api/tools/{name}", s.callTool)
+	mux.HandleFunc("GET /api/applications", s.listApplications)
 	mux.HandleFunc("POST /api/scan/ingest", s.ingest)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
+	mux.HandleFunc("GET /", s.index)
 	return mux
 }
 
@@ -40,11 +46,25 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// index serves the embedded dashboard at "/" (and 404s any other unmatched path).
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		http.Error(w, "ui unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(b)
+}
+
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
-// tools returns the MCP-shaped manifest the Go MCP proxy mirrors.
 func (s *Server) tools(w http.ResponseWriter, _ *http.Request) {
 	type tool struct {
 		Name        string `json:"name"`
@@ -78,8 +98,19 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ingest accepts scraped RawPostings, dedups+scores them via the engine, and
-// persists via the store.
+func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	apps, err := s.Store.ListApplications(r.Context(), 100)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applications": apps})
+}
+
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	if s.Store == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
@@ -120,6 +151,5 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cycle(w http.ResponseWriter, _ *http.Request) {
-	// operator-lite not yet wired; accept and report.
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "note": "operator not yet wired"})
 }

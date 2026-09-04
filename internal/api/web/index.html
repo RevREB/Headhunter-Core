@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headhunter</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8; --panel: #fff; --ink: #16171a; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --accent-ink: #fff; --chip: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0f13; --panel: #16181d; --ink: #e8eaed; --muted: #9aa1ab;
+      --line: #262a31; --accent: #3b82f6; --accent-ink: #fff; --chip: #1e2430;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.55 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
+  header { display: flex; align-items: baseline; gap: .75rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
+  header .tag { color: var(--muted); font-size: .85rem; }
+  header .spacer { flex: 1; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: .4rem .8rem; border-radius: 8px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  button:active { transform: translateY(1px); }
+  main { max-width: 68rem; margin: 0 auto; padding: 1.5rem; display: grid; gap: 1.5rem; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.25rem; }
+  section h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 .9rem; }
+  .funnel { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .stage { flex: 1 1 7rem; min-width: 7rem; background: var(--chip); border-radius: 10px; padding: .7rem .8rem; }
+  .stage .n { font-size: 1.5rem; font-weight: 650; }
+  .stage .l { color: var(--muted); font-size: .8rem; text-transform: capitalize; }
+  .side { display: flex; gap: 1.25rem; margin-top: .9rem; color: var(--muted); font-size: .85rem; flex-wrap: wrap; }
+  .side b { color: var(--ink); }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 550; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  td.status { text-transform: capitalize; }
+  .empty { color: var(--muted); padding: 1.5rem .2rem; text-align: center; }
+  .pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px; background: var(--chip); font-size: .78rem; }
+  .scroll { overflow-x: auto; }
+  footer { color: var(--muted); font-size: .8rem; text-align: center; padding: 1rem 0 2rem; }
+  a { color: var(--accent); }
+</style>
+
+<header>
+  <h1>Headhunter</h1>
+  <span class="tag" id="tag">core dashboard</span>
+  <span class="spacer"></span>
+  <button id="cycle">Run cycle</button>
+  <button class="primary" id="refresh">Refresh</button>
+</header>
+
+<main>
+  <section>
+    <h2>Pipeline funnel</h2>
+    <div class="funnel" id="funnel"><div class="empty">loading…</div></div>
+    <div class="side" id="side"></div>
+  </section>
+
+  <section>
+    <h2>Applications</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>#</th><th>Company</th><th>Role</th><th>Score</th><th>Status</th><th>Added</th></tr></thead>
+        <tbody id="apps"><tr><td colspan="6" class="empty">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>Headhunter-Core · served from the engine · <a href="/api/tools">/api/tools</a></footer>
+
+<script>
+  const FUNNEL = ["evaluated","applied","responded","interview","offer","hired"];
+  const SIDE = ["rejected","discarded","skip"];
+
+  async function loadStats() {
+    const el = document.getElementById("funnel"), side = document.getElementById("side");
+    try {
+      const r = await fetch("/api/tools/stats", { method: "POST" });
+      const d = await r.json();
+      const c = (d && d.result) || {};
+      el.innerHTML = "";
+      for (const s of FUNNEL) {
+        const div = document.createElement("div");
+        div.className = "stage";
+        div.innerHTML = `<div class="n">${c[s] || 0}</div><div class="l">${s}</div>`;
+        el.appendChild(div);
+      }
+      side.innerHTML = SIDE.map(s => `<span><b>${c[s] || 0}</b> ${s}</span>`).join("");
+    } catch (e) { el.innerHTML = `<div class="empty">core unavailable: ${e}</div>`; }
+  }
+
+  async function loadApps() {
+    const tb = document.getElementById("apps");
+    try {
+      const r = await fetch("/api/applications");
+      const d = await r.json();
+      const apps = (d && d.applications) || [];
+      if (!apps.length) {
+        tb.innerHTML = `<tr><td colspan="6" class="empty">No applications yet — import the tracker or run a cycle to populate this.</td></tr>`;
+        return;
+      }
+      tb.innerHTML = apps.map(a => `
+        <tr>
+          <td>${a.id}</td>
+          <td>${a.url ? `<a href="${a.url}" target="_blank" rel="noopener">${esc(a.company)}</a>` : esc(a.company)}</td>
+          <td>${esc(a.role)}</td>
+          <td>${a.score != null ? a.score.toFixed(1) : "—"}</td>
+          <td class="status"><span class="pill">${esc(a.status)}</span></td>
+          <td>${a.createdAt ? a.createdAt.slice(0,10) : ""}</td>
+        </tr>`).join("");
+    } catch (e) { tb.innerHTML = `<tr><td colspan="6" class="empty">core unavailable: ${e}</td></tr>`; }
+  }
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+  function refresh() { loadStats(); loadApps(); }
+
+  document.getElementById("refresh").onclick = refresh;
+  document.getElementById("cycle").onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = "…";
+    try { await fetch("/api/cycle", { method: "POST" }); } catch (_) {}
+    setTimeout(() => { e.target.disabled = false; e.target.textContent = "Run cycle"; refresh(); }, 1200);
+  };
+  refresh();
+</script>
+</html>
