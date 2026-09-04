@@ -22,6 +22,25 @@ func env(k, def string) string {
 	return def
 }
 
+// connectWithRetry waits out first-boot races (e.g. CNPG still provisioning the
+// role/database) rather than crash-looping.
+func connectWithRetry(dsn string, budget time.Duration) *store.Store {
+	deadline := time.Now().Add(budget)
+	for attempt := 1; ; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		st, err := store.Open(ctx, dsn)
+		cancel()
+		if err == nil {
+			return st
+		}
+		if time.Now().After(deadline) {
+			log.Fatalf("db connect: gave up after %d attempts: %v", attempt, err)
+		}
+		log.Printf("db connect attempt %d failed: %v; retrying in 3s", attempt, err)
+		time.Sleep(3 * time.Second)
+	}
+}
+
 func main() {
 	addr := env("LISTEN_ADDR", ":8080")
 	dsn := os.Getenv("DATABASE_URL")
@@ -29,13 +48,9 @@ func main() {
 	var st *store.Store
 	var an *analytics.Analytics
 	if dsn != "" {
+		st = connectWithRetry(dsn, 120*time.Second)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		var err error
-		st, err = store.Open(ctx, dsn)
-		if err != nil {
-			log.Fatalf("db connect: %v", err)
-		}
 		if err := st.Migrate(ctx); err != nil {
 			log.Fatalf("migrate: %v", err)
 		}
