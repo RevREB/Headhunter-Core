@@ -72,6 +72,18 @@ func (s *Store) IngestPosting(
 			 VALUES ($1, 'inbox'::application_status, 'scan')`, appID); err != nil {
 			return IngestResult{}, err
 		}
+	} else {
+		// Re-sighting: refresh the stored posting doc so a later scrape backfills
+		// richer data (e.g. a JD that greenhouse/workday didn't capture before).
+		tag, err := tx.Exec(ctx, `UPDATE postings SET doc=$2 WHERE application_id=$1`, appID, rawDoc)
+		if err != nil {
+			return IngestResult{}, err
+		}
+		if tag.RowsAffected() == 0 {
+			if _, err := tx.Exec(ctx, `INSERT INTO postings (application_id, doc) VALUES ($1, $2)`, appID, rawDoc); err != nil {
+				return IngestResult{}, err
+			}
+		}
 	}
 	// always record the sighting (dedup/repost analytics live off this table)
 	fp := int64(fingerprint) // store the 64-bit SimHash as bytea-compatible int

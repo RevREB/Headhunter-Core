@@ -344,7 +344,7 @@ func (s *Server) systemPrompt(ctx context.Context) string {
 		}
 	}
 	b.WriteString("\nYou can drive the UI by emitting an action tag alone on its own line:\n")
-	b.WriteString("  <<act:navigate {\"view\":\"VIEW\"}>>  VIEW in: today, explore, pipeline, followups, portals, analytics, cv, config\n")
+	b.WriteString("  <<act:navigate {\"view\":\"VIEW\"}>>  VIEW in: today, explore, pipeline, followups, portals, analytics, profile, config\n")
 	b.WriteString("  <<act:filter {\"status\":\"STATUS\"}>>  filter the Pipeline (also navigates there)\n")
 	b.WriteString("Emit an action ONLY when the user clearly wants to navigate or filter; otherwise just answer.")
 	return b.String()

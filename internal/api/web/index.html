@@ -160,6 +160,11 @@
   .meta-grid .mv a { color: var(--accent); }
   pre.raw { margin: 0; max-height: 340px; overflow: auto; font-family: ui-monospace, monospace; font-size: .78rem; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
   @media (max-width: 720px) { .meta-grid { grid-template-columns: 1fr; } }
+  /* profile fields */
+  .pf-row { margin-bottom: .85rem; }
+  .pf-row label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .12rem; }
+  .pf-row .d { color: var(--muted); font-size: .76rem; margin-bottom: .25rem; }
+  .pf { width: 100%; font: inherit; resize: vertical; }
 </style>
 
 <aside>
@@ -171,7 +176,7 @@
     <a href="#followups" data-view="followups"><span class="ic">↻</span><span>Follow-ups</span></a>
     <a href="#portals" data-view="portals"><span class="ic">◎</span><span>Portals</span></a>
     <a href="#analytics" data-view="analytics"><span class="ic">▤</span><span>Analytics</span></a>
-    <a href="#cv" data-view="cv"><span class="ic">▦</span><span>CV</span></a>
+    <a href="#profile" data-view="profile"><span class="ic">▦</span><span>Profile</span></a>
     <a href="#config" data-view="config"><span class="ic">⚙</span><span>Config</span></a>
   </nav>
   <div class="spacer"></div>
@@ -267,11 +272,18 @@
   </section>
 
   <!-- CV -->
-  <section class="view" id="view-cv">
-    <div class="hero" style="display:flex;justify-content:space-between;align-items:flex-end">
-      <div><div class="kicker">CV editor</div><h1>Your <b>résumé</b></h1><p>Edit cv.md with a live preview.</p></div>
-      <button class="btn go" id="cv-save">Save</button>
+  <section class="view" id="view-profile">
+    <div class="hero" style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap">
+      <div><div class="kicker">Profile</div><h1>What Headhunter knows about <b>you</b></h1>
+        <p>Everything that drives evaluation — your search criteria and your résumé. Local-first: this lives only on your cluster, and the evaluator reads it for every job.</p></div>
+      <button class="btn go" id="profile-save">Save profile</button>
     </div>
+    <div class="card pad">
+      <h2 class="sec" style="margin-top:0">Search criteria <span class="hint">fed to the evaluator for every role</span></h2>
+      <div id="profile-fields"><div class="empty">loading…</div></div>
+      <span class="hint" id="profile-saved" style="color:var(--muted)"></span>
+    </div>
+    <h2 class="sec">Résumé <span class="hint">cv.md — one component of your profile</span></h2>
     <div class="split">
       <textarea id="cv-src" spellcheck="false" placeholder="loading cv.md…"></textarea>
       <div class="card prose" id="cv-preview"></div>
@@ -372,7 +384,7 @@
   }
   window.hhSet = setStatus;
 
-  function renderAll(){ renderToday(); renderPipe(); renderAnalytics(); renderExplore(); renderPortals(); renderConfig(); renderCV(); }
+  function renderAll(){ renderToday(); renderPipe(); renderAnalytics(); renderExplore(); renderPortals(); renderConfig(); renderProfile(); }
 
   function renderToday() {
     const awaiting = ALL.filter(a=>a.status==="evaluated").sort((a,b)=>(b.score||0)-(a.score||0));
@@ -527,8 +539,37 @@
   function renderConfig() {
     document.getElementById("cadence").innerHTML = CAD.map(c=>`<div class="fld"><label>${c[1]}</label><div class="d">${c[2]}</div><input type="number" min="0" id="cad-${c[0]}" value="${cadence[c[0]]}"></div>`).join("");
   }
-  let cvLoaded = false;
-  function renderCV() {
+  // Profile: the search criteria the evaluator reads, plus the résumé. Field
+  // values live in config['profile'] (a JSON object) — never in this source.
+  const PROFILE_FIELDS = [
+    {k:"name", label:"Name"},
+    {k:"pronouns", label:"Pronouns"},
+    {k:"work_auth", label:"Work authorization", hint:"citizenship / sponsorship"},
+    {k:"domicile", label:"Domicile / jurisdiction"},
+    {k:"comp_target", label:"Compensation target"},
+    {k:"remote", label:"Remote & relocation", hint:"hard requirements + any exceptions", multi:true},
+    {k:"target_roles", label:"Target roles", hint:"what to surface", multi:true},
+    {k:"exclusions", label:"Hard exclusions", hint:"what to rule out", multi:true},
+    {k:"address", label:"Address", hint:"for ATS 'legal address' fields"},
+    {k:"phone", label:"Phone"},
+    {k:"email", label:"Email"},
+    {k:"linkedin", label:"LinkedIn"},
+    {k:"github", label:"GitHub"},
+  ];
+  let profileLoaded = false, cvLoaded = false;
+  function renderProfile() {
+    if (!profileLoaded) {
+      let prof = {};
+      if (CONFIG.profile !== undefined) { try { prof = JSON.parse(CONFIG.profile); } catch(_){} }
+      document.getElementById("profile-fields").innerHTML = PROFILE_FIELDS.map(f => {
+        const v = esc(prof[f.k] || "");
+        const ctl = f.multi
+          ? `<textarea class="pf" data-k="${f.k}" rows="3">${v}</textarea>`
+          : `<input class="pf" data-k="${f.k}" value="${v}">`;
+        return `<div class="pf-row"><label>${f.label}</label>${f.hint?`<div class="d">${f.hint}</div>`:""}${ctl}</div>`;
+      }).join("");
+      profileLoaded = true;
+    }
     if (!cvLoaded && CONFIG.cv !== undefined) {
       let text = ""; try { text = JSON.parse(CONFIG.cv); } catch(_){ text = CONFIG.cv; }
       document.getElementById("cv-src").value = text; cvLoaded = true;
@@ -552,7 +593,16 @@
   document.getElementById("cfg-logos").onclick = e => e.currentTarget.classList.toggle("on");
   document.getElementById("cfg-save").onclick = () => { CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value)); saveConfig("cadence", cadence, document.getElementById("cfg-saved")); };
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
-  document.getElementById("cv-save").onclick = e => saveConfig("cv", document.getElementById("cv-src").value, null).then(()=>{ e.target.textContent="Saved ✓"; setTimeout(()=>e.target.textContent="Save",1500); });
+  document.getElementById("profile-save").onclick = async e => {
+    const obj = {};
+    document.querySelectorAll("#profile-fields .pf").forEach(el => { const v = el.value.trim(); if (v) obj[el.dataset.k] = v; });
+    e.target.disabled = true;
+    const okP = await saveConfig("profile", obj, null);
+    const okC = await saveConfig("cv", document.getElementById("cv-src").value, null);
+    e.target.disabled = false;
+    e.target.textContent = (okP && okC) ? "Saved ✓" : "Save failed";
+    setTimeout(()=>e.target.textContent="Save profile", 1600);
+  };
   document.getElementById("pipe-eval").onclick = async e => {
     const btn = e.target; btn.disabled = true; const orig = btn.textContent; btn.textContent = "Evaluating…";
     try {
