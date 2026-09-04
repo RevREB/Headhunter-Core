@@ -13,6 +13,7 @@ import (
 	"github.com/RevREB/Headhunter-Core/internal/analytics"
 	"github.com/RevREB/Headhunter-Core/internal/api"
 	"github.com/RevREB/Headhunter-Core/internal/llm"
+	"github.com/RevREB/Headhunter-Core/internal/operator"
 	"github.com/RevREB/Headhunter-Core/internal/store"
 )
 
@@ -61,7 +62,14 @@ func main() {
 		log.Printf("DATABASE_URL unset — serving health only (degraded mode)")
 	}
 
-	srv := api.New(st, an, llm.FromEnv())
+	var cyc api.Cycler
+	if op, err := operator.New(); err != nil {
+		log.Printf("operator disabled: %v", err)
+	} else {
+		cyc = op
+		go op.RunTicker(context.Background())
+	}
+	srv := api.New(st, an, llm.FromEnv(), cyc)
 	log.Printf("headhunter-core listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
 }

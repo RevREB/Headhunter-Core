@@ -26,15 +26,22 @@ var webFS embed.FS
 
 // Server holds the API dependencies. Store/Analytics may be nil (health-only
 // degraded mode when DATABASE_URL is unset).
+// Cycler launches a scan cycle (the operator). An interface so this package
+// stays decoupled from client-go.
+type Cycler interface {
+	RunCycle(ctx context.Context) (int, error)
+}
+
 type Server struct {
 	Store     *store.Store
 	Analytics *analytics.Analytics
 	LLM       *llm.Client
+	Operator  Cycler
 }
 
 // New builds the API server.
-func New(st *store.Store, an *analytics.Analytics, l *llm.Client) *Server {
-	return &Server{Store: st, Analytics: an, LLM: l}
+func New(st *store.Store, an *analytics.Analytics, l *llm.Client, op Cycler) *Server {
+	return &Server{Store: st, Analytics: an, LLM: l, Operator: op}
 }
 
 // Routes returns the HTTP handler.
@@ -347,6 +354,15 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "deduped": deduped, "failed": failed})
 }
 
-func (s *Server) cycle(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "note": "operator not yet wired"})
+func (s *Server) cycle(w http.ResponseWriter, r *http.Request) {
+	if s.Operator == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "operator not configured"})
+		return
+	}
+	n, err := s.Operator.RunCycle(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "launched", "scrapers": n})
 }
