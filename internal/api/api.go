@@ -57,6 +57,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/config", s.getConfig)
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
+	mux.HandleFunc("POST /api/evaluate", s.evaluate)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("GET /icon.png", s.icon)
 	mux.HandleFunc("GET /favicon.ico", s.icon)
@@ -319,6 +320,106 @@ func (s *Server) systemPrompt(ctx context.Context) string {
 	b.WriteString("  <<act:filter {\"status\":\"STATUS\"}>>  filter the Pipeline (also navigates there)\n")
 	b.WriteString("Emit an action ONLY when the user clearly wants to navigate or filter; otherwise just answer.")
 	return b.String()
+}
+
+func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
+	if s.LLM == nil || s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "evaluator not configured (LLM or DB missing)"})
+		return
+	}
+	limit := 10
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 25 {
+		limit = 25
+	}
+	apps, err := s.Store.ListApplications(r.Context(), limit, "inbox")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	cv := ""
+	if cfg, err := s.Store.GetAllConfig(r.Context()); err == nil {
+		if raw, ok := cfg["cv"]; ok {
+			_ = json.Unmarshal(raw, &cv)
+		}
+	}
+	if len(cv) > 6000 {
+		cv = cv[:6000]
+	}
+	threshold := 3.0
+	if v := os.Getenv("EVAL_DISCARD_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			threshold = f
+		}
+	}
+	var evaluated, discarded, failed int
+	for _, a := range apps {
+		score, report, err := s.evalOne(r.Context(), cv, a)
+		if err != nil {
+			failed++
+			continue
+		}
+		to := "evaluated"
+		if score < threshold {
+			to = "discarded"
+		}
+		if err := s.Store.SaveEvaluation(r.Context(), a.ID, score, to, report); err != nil {
+			failed++
+			continue
+		}
+		if to == "evaluated" {
+			evaluated++
+		} else {
+			discarded++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "processed": len(apps), "evaluated": evaluated, "discarded": discarded, "failed": failed,
+	})
+}
+
+func (s *Server) evalOne(ctx context.Context, cv string, a store.Application) (float64, json.RawMessage, error) {
+	sys := "You are a precise, calibrated job-fit evaluator for a candidate's job search. " +
+		"Given the candidate's resume and one job posting, score the fit from 0.0 to 5.0 " +
+		"(>=4 strong, 3-4 plausible, <3 weak) and be honest. " +
+		"Return ONLY compact JSON, no prose, no code fences: " +
+		`{"score":<float>,"verdict":"<one sentence>","strengths":["..."],"concerns":["..."],"hard_stops":["..."]}`
+	usr := fmt.Sprintf("CANDIDATE RESUME:\n%s\n\nJOB POSTING:\nCompany: %s\nRole: %s\n\nScore the fit.",
+		cv, a.Company, a.Role)
+	resp, err := s.LLM.Complete(ctx, []llm.Msg{{Role: "system", Content: sys}, {Role: "user", Content: usr}})
+	if err != nil {
+		return 0, nil, err
+	}
+	j := extractJSON(resp)
+	var ev struct {
+		Score float64 `json:"score"`
+	}
+	if err := json.Unmarshal(j, &ev); err != nil {
+		return 0, nil, fmt.Errorf("parse eval: %w", err)
+	}
+	if ev.Score < 0 {
+		ev.Score = 0
+	}
+	if ev.Score > 5 {
+		ev.Score = 5
+	}
+	return ev.Score, json.RawMessage(j), nil
+}
+
+// extractJSON pulls the first {...} object out of a model reply (tolerating
+// code fences or surrounding prose).
+func extractJSON(s string) []byte {
+	s = strings.TrimSpace(s)
+	i := strings.IndexByte(s, '{')
+	j := strings.LastIndexByte(s, '}')
+	if i >= 0 && j > i {
+		return []byte(s[i : j+1])
+	}
+	return []byte(s)
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {

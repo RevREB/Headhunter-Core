@@ -204,7 +204,10 @@
   <section class="view" id="view-pipeline">
     <div class="hero" style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap">
       <div><div class="kicker">Pipeline</div><h1 id="pipe-head">The tracker</h1></div>
-      <input class="grow" id="q" placeholder="Search company or role…" style="max-width:20rem">
+      <div style="display:flex;gap:.6rem;align-items:center">
+        <button class="btn go" id="pipe-eval" title="Score the next 10 inbox postings against your CV">✦ Evaluate 10</button>
+        <input class="grow" id="q" placeholder="Search company or role…" style="max-width:17rem">
+      </div>
     </div>
     <div class="tabs" id="pipe-tabs"></div>
     <div class="scroll"><table>
@@ -452,6 +455,16 @@
   document.getElementById("cfg-save").onclick = () => { CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value)); saveConfig("cadence", cadence, document.getElementById("cfg-saved")); };
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
   document.getElementById("cv-save").onclick = e => saveConfig("cv", document.getElementById("cv-src").value, null).then(()=>{ e.target.textContent="Saved ✓"; setTimeout(()=>e.target.textContent="Save",1500); });
+  document.getElementById("pipe-eval").onclick = async e => {
+    const btn = e.target; btn.disabled = true; const orig = btn.textContent; btn.textContent = "Evaluating…";
+    try {
+      const r = await fetch("/api/evaluate?limit=10", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { btn.textContent = d.error || "failed"; }
+      else { btn.textContent = `✓ ${d.evaluated} scored, ${d.discarded} cut`; await load(); }
+    } catch (err) { btn.textContent = "error"; }
+    setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 3500);
+  };
   document.getElementById("q").addEventListener("input", renderPipe);
   document.querySelectorAll("#view-pipeline th.sortable").forEach(th => th.addEventListener("click", () => {
     const c = th.dataset.sort;

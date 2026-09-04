@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -87,4 +88,39 @@ func (c *Client) Stream(ctx context.Context, msgs []Msg, onDelta func(string)) e
 		}
 	}
 	return sc.Err()
+}
+
+// Complete sends messages and returns the full assistant reply (non-streaming).
+func (c *Client) Complete(ctx context.Context, msgs []Msg) (string, error) {
+	body, _ := json.Marshal(map[string]any{"model": c.Model, "messages": msgs, "stream": false})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.Key)
+	req.Header.Set("x-bf-vk", c.Key)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("llm %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("llm: no choices")
+	}
+	return out.Choices[0].Message.Content, nil
 }
