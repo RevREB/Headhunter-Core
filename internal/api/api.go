@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RevREB/Headhunter-Core/internal/analytics"
 	"github.com/RevREB/Headhunter-Core/internal/engine"
@@ -420,24 +421,36 @@ func (s *Server) evalOne(ctx context.Context, cv string, a store.Application, po
 		"Return ONLY compact JSON, no prose, no code fences: " +
 		`{"score":<float>,"verdict":"<one sentence>","strengths":["..."],"concerns":["..."],"hard_stops":["..."]}`
 	usr := fmt.Sprintf("CANDIDATE RESUME:\n%s\n\nJOB POSTING:\n%s\nScore the fit.", cv, jobContext(a, postingDoc))
-	resp, err := s.LLM.Complete(ctx, []llm.Msg{{Role: "system", Content: sys}, {Role: "user", Content: usr}})
-	if err != nil {
-		return 0, nil, err
+	msgs := []llm.Msg{{Role: "system", Content: sys}, {Role: "user", Content: usr}}
+
+	// The gateway occasionally returns an empty/truncated body; retry a few times.
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if attempt > 1 {
+			time.Sleep(400 * time.Millisecond)
+		}
+		resp, err := s.LLM.Complete(ctx, msgs)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var ev struct {
+			Score float64 `json:"score"`
+		}
+		j := extractJSON(resp)
+		if err := json.Unmarshal(j, &ev); err != nil {
+			lastErr = fmt.Errorf("parse eval (attempt %d, resp %dB): %w", attempt, len(resp), err)
+			continue
+		}
+		if ev.Score < 0 {
+			ev.Score = 0
+		}
+		if ev.Score > 5 {
+			ev.Score = 5
+		}
+		return ev.Score, json.RawMessage(j), nil
 	}
-	j := extractJSON(resp)
-	var ev struct {
-		Score float64 `json:"score"`
-	}
-	if err := json.Unmarshal(j, &ev); err != nil {
-		return 0, nil, fmt.Errorf("parse eval: %w", err)
-	}
-	if ev.Score < 0 {
-		ev.Score = 0
-	}
-	if ev.Score > 5 {
-		ev.Score = 5
-	}
-	return ev.Score, json.RawMessage(j), nil
+	return 0, nil, lastErr
 }
 
 // jobContext builds the posting block for the evaluator: title + company always,
