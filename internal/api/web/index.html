@@ -15,33 +15,33 @@
   body { font: 14.5px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--ink); display: flex; }
   a { color: inherit; text-decoration: none; }
 
-  /* sidebar */
   aside { width: 220px; flex: none; background: #0a0b0e; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 1rem .75rem; position: sticky; top: 0; height: 100vh; }
   .brand { display: flex; align-items: center; gap: .5rem; font-weight: 650; letter-spacing: -.01em; padding: .3rem .5rem 1.1rem; }
-  .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #b5623a); display: inline-block; }
+  .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #b5623a); }
   nav a { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border-radius: 8px; color: var(--muted); font-weight: 500; margin-bottom: 2px; }
   nav a .ic { width: 18px; text-align: center; opacity: .85; }
+  nav a .tag { margin-left: auto; font-size: .6rem; letter-spacing: .06em; background: var(--accent-dim); color: var(--accent); padding: .05rem .3rem; border-radius: 4px; }
   nav a:hover { background: var(--panel); color: var(--ink); }
   nav a.active { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
   aside .spacer { flex: 1; }
   aside .foot { color: var(--muted); font-size: .72rem; padding: .5rem; border-top: 1px solid var(--line); }
   aside .foot b { color: var(--ink); }
 
-  /* main */
   main { flex: 1; min-width: 0; max-width: 1000px; margin: 0 auto; padding: 2rem 2rem 4rem; width: 100%; }
   .view { display: none; }
   .view.active { display: block; }
 
-  .hero { padding: .5rem 0 1.75rem; }
+  .hero { padding: .5rem 0 1.5rem; }
   .hero .kicker { color: var(--accent); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; }
   .hero h1 { font: 400 2.3rem/1.15 var(--serif); margin: .35rem 0 .1rem; letter-spacing: -.01em; }
   .hero h1 b { color: var(--accent); font-weight: 400; }
-  .hero p { color: var(--muted); margin: .3rem 0 0; }
+  .hero p { color: var(--muted); margin: .3rem 0 0; max-width: 46rem; }
 
-  h2.sec { font-size: .74rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 1.8rem 0 .8rem; display: flex; align-items: baseline; gap: .6rem; }
+  h2.sec { font-size: .74rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 1.6rem 0 .8rem; display: flex; align-items: baseline; gap: .6rem; }
   h2.sec .hint { text-transform: none; letter-spacing: 0; font-size: .8rem; opacity: .7; font-weight: 400; }
 
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  .pad { padding: 1rem 1.1rem; }
   .row { display: flex; align-items: center; gap: .8rem; padding: .7rem .9rem; border-bottom: 1px solid var(--line); }
   .row:last-child { border-bottom: 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: .7rem; }
@@ -60,7 +60,15 @@
   .pill.rejected, .pill.discarded, .pill.skip { color: var(--bad); }
   .pill.interview, .pill.offer, .pill.responded, .pill.hired { color: var(--good); }
 
-  /* stat strip / funnel */
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .chip { display: inline-flex; align-items: center; gap: .4rem; background: var(--chip); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: .22rem .6rem; font-size: .82rem; }
+  .chip.ex { color: var(--muted); }
+  .chip.src { color: var(--accent); border-color: var(--accent-dim); }
+  .chip x { cursor: pointer; opacity: .6; font-style: normal; }
+  .chip x:hover { opacity: 1; color: var(--bad); }
+  .seg { display: inline-flex; gap: .3rem; }
+  .seg .btn.on { background: var(--accent); color: #1a120c; border-color: transparent; }
+
   .funnel { display: flex; gap: .5rem; flex-wrap: wrap; }
   .stage { flex: 1 1 6rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem .75rem; }
   .stage .n { font: 400 1.55rem/1 var(--serif); }
@@ -68,29 +76,58 @@
   .bar { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; margin-top: .5rem; }
   .bar > i { display: block; height: 100%; background: var(--accent); }
 
-  /* pipeline table */
   .toolbar { display: flex; gap: .6rem; margin-bottom: .8rem; flex-wrap: wrap; }
-  input, select { font: inherit; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: .4rem .6rem; }
-  input { flex: 1; min-width: 12rem; }
+  input, select, textarea { font: inherit; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: .4rem .6rem; }
+  input.grow { flex: 1; min-width: 12rem; }
   table { width: 100%; border-collapse: collapse; font-size: .88rem; }
   th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
-  th { color: var(--muted); font-weight: 550; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; background: var(--bg); }
   td.num, td.sc { font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 550; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; position: sticky; top: 0; background: var(--bg); }
   .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
   .empty { color: var(--muted); text-align: center; padding: 2rem; }
   .topbar { display: flex; justify-content: flex-end; margin-bottom: -1rem; }
+
+  /* cv split */
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  .split textarea { width: 100%; min-height: 62vh; resize: vertical; font-family: ui-monospace, monospace; font-size: .82rem; line-height: 1.5; }
+  .prose { padding: 1rem 1.2rem; overflow: auto; min-height: 62vh; }
+  .prose h1 { font: 400 1.5rem var(--serif); margin: .2rem 0 .6rem; }
+  .prose h2 { font-size: .95rem; border-bottom: 1px solid var(--line); padding-bottom: .2rem; margin: 1.1rem 0 .5rem; }
+  .prose h3 { font-size: .9rem; margin: .8rem 0 .3rem; }
+  .prose ul { margin: .3rem 0 .3rem 1rem; padding: 0; }
+  .prose li { margin: .15rem 0; }
+  .prose a { color: var(--accent); }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } aside { width: 60px; } nav a span:not(.ic) { display: none; } }
+  /* config */
+  .cards3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+  .opt { border: 1px solid var(--line); border-radius: 10px; padding: .8rem; background: var(--panel); }
+  .opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+  .opt .t { font-weight: 600; margin-bottom: .2rem; }
+  .opt .s { color: var(--muted); font-size: .78rem; }
+  .form2 { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem 1.2rem; }
+  .fld label { display: block; font-weight: 600; font-size: .85rem; }
+  .fld .d { color: var(--muted); font-size: .76rem; margin: .1rem 0 .3rem; }
+  .fld input { width: 5rem; }
+  .toggle { width: 42px; height: 24px; border-radius: 999px; background: var(--chip); border: 1px solid var(--line); position: relative; cursor: pointer; }
+  .toggle.on { background: var(--accent); }
+  .toggle i { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .12s; }
+  .toggle.on i { left: 20px; }
 </style>
 
 <aside>
   <div class="brand"><span class="mark"></span> headhunter</div>
   <nav>
-    <a href="#today" data-view="today"><span class="ic">◎</span> Today</a>
-    <a href="#pipeline" data-view="pipeline"><span class="ic">≡</span> Pipeline</a>
-    <a href="#followups" data-view="followups"><span class="ic">↻</span> Follow-ups</a>
-    <a href="#analytics" data-view="analytics"><span class="ic">▤</span> Analytics</a>
+    <a href="#today" data-view="today"><span class="ic">◎</span><span>Today</span></a>
+    <a href="#explore" data-view="explore"><span class="ic">◐</span><span>Explore</span><span class="tag">NEW</span></a>
+    <a href="#pipeline" data-view="pipeline"><span class="ic">≡</span><span>Pipeline</span></a>
+    <a href="#followups" data-view="followups"><span class="ic">↻</span><span>Follow-ups</span></a>
+    <a href="#portals" data-view="portals"><span class="ic">◎</span><span>Portals</span></a>
+    <a href="#analytics" data-view="analytics"><span class="ic">▤</span><span>Analytics</span></a>
+    <a href="#cv" data-view="cv"><span class="ic">▦</span><span>CV</span></a>
+    <a href="#config" data-view="config"><span class="ic">⚙</span><span>Config</span></a>
   </nav>
   <div class="spacer"></div>
-  <div class="foot"><b id="foot-count">—</b> applications<br>Headhunter-Core · <span id="foot-ver">core</span></div>
+  <div class="foot"><b id="foot-count">—</b> applications<br>Headhunter-Core</div>
 </aside>
 
 <main>
@@ -101,7 +138,7 @@
     <div class="hero">
       <div class="kicker" id="today-kicker">Today</div>
       <h1 id="today-head"><b>—</b> awaiting your decision</h1>
-      <p id="today-sub">Your action queue — score-ranked postings and applications to nudge.</p>
+      <p>Your action queue — score-ranked postings and applications to nudge.</p>
     </div>
     <h2 class="sec">Awaiting your decision <span class="hint">scored — apply or skip</span></h2>
     <div class="grid" id="awaiting"><div class="empty">loading…</div></div>
@@ -109,25 +146,50 @@
     <div class="card" id="followups-list"><div class="empty">loading…</div></div>
   </section>
 
+  <!-- EXPLORE -->
+  <section class="view" id="view-explore">
+    <div class="hero"><div class="kicker">Explore</div><h1>Scan the <b>ATS network</b></h1>
+      <p>Discovery matches fresh postings from the public ATS network to your roles — free, zero tokens. You only spend when you choose to evaluate one.</p></div>
+    <div class="card pad">
+      <h2 class="sec" style="margin-top:0">Roles to find</h2>
+      <div class="chips" id="ex-roles"></div>
+      <div class="toolbar" style="margin:.7rem 0 0"><input class="grow" id="ex-role-add" placeholder="add a role and press Enter…"></div>
+      <h2 class="sec">Exclude</h2>
+      <div class="chips" id="ex-excl"></div>
+      <h2 class="sec">Posted within</h2>
+      <div class="seg" id="ex-window"></div>
+      <h2 class="sec">Sources</h2>
+      <div class="chips" id="ex-sources"></div>
+      <div style="display:flex;gap:.7rem;align-items:center;margin-top:1.2rem">
+        <button class="btn go" id="ex-discover">◐ Discover (free)</button>
+        <button class="btn ghost" id="ex-save">Save preferences</button>
+        <span class="hint" style="color:var(--muted);font-size:.8rem">Evaluating a role later costs tokens. Discovering never does.</span>
+      </div>
+    </div>
+  </section>
+
   <!-- PIPELINE -->
   <section class="view" id="view-pipeline">
     <div class="hero"><div class="kicker">Pipeline</div><h1>The <b>full</b> tracker</h1></div>
-    <div class="toolbar">
-      <input id="q" placeholder="filter by company or role…">
-      <select id="statusFilter"></select>
-    </div>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>#</th><th>Company</th><th>Role</th><th>Score</th><th>Status</th><th>Added</th></tr></thead>
-        <tbody id="pipe-body"><tr><td colspan="6" class="empty">loading…</td></tr></tbody>
-      </table>
-    </div>
+    <div class="toolbar"><input class="grow" id="q" placeholder="filter by company or role…"><select id="statusFilter"></select></div>
+    <div class="scroll"><table>
+      <thead><tr><th>#</th><th>Company</th><th>Role</th><th>Score</th><th>Status</th><th>Added</th></tr></thead>
+      <tbody id="pipe-body"><tr><td colspan="6" class="empty">loading…</td></tr></tbody>
+    </table></div>
   </section>
 
   <!-- FOLLOW-UPS -->
   <section class="view" id="view-followups">
     <div class="hero"><div class="kicker">Follow-ups</div><h1><b id="fu-n">—</b> to keep alive</h1><p>Applications in flight — a nudge beats silence.</p></div>
     <div class="card" id="fu-full"><div class="empty">loading…</div></div>
+  </section>
+
+  <!-- PORTALS -->
+  <section class="view" id="view-portals">
+    <div class="hero"><div class="kicker">Portals</div><h1>Sources we <b>watch</b></h1>
+      <p>The ATS networks Headhunter scans for new roles. A broken source silently disappears from every future scan — run a health check to catch it.</p></div>
+    <div class="card" id="portals-list"></div>
+    <div style="margin-top:1rem"><button class="btn go" id="portal-check">◎ Check portal health</button></div>
   </section>
 
   <!-- ANALYTICS -->
@@ -138,12 +200,50 @@
     <h2 class="sec">Full distribution</h2>
     <div class="card" id="dist"><div class="empty">loading…</div></div>
   </section>
+
+  <!-- CV -->
+  <section class="view" id="view-cv">
+    <div class="hero" style="display:flex;justify-content:space-between;align-items:flex-end">
+      <div><div class="kicker">CV editor</div><h1>Your <b>résumé</b></h1><p>Edit cv.md with a live preview.</p></div>
+      <button class="btn go" id="cv-save">Save</button>
+    </div>
+    <div class="split">
+      <textarea id="cv-src" spellcheck="false" placeholder="loading cv.md…"></textarea>
+      <div class="card prose" id="cv-preview"></div>
+    </div>
+  </section>
+
+  <!-- CONFIG -->
+  <section class="view" id="view-config">
+    <div class="hero"><div class="kicker">Config</div><h1>Your <b>settings</b></h1><p>Follow-up cadence, appearance, and the AI engine. Local-first — your data stays on your cluster.</p></div>
+    <h2 class="sec">AI engine</h2>
+    <div class="cards3">
+      <div class="opt on"><div class="t">Bifrost gateway</div><div class="s">Uses your in-cluster LLM gateway. Recommended.</div></div>
+      <div class="opt"><div class="t">Paste an API key</div><div class="s">Coming soon</div></div>
+      <div class="opt"><div class="t">No setup needed</div><div class="s">Coming soon</div></div>
+    </div>
+    <h2 class="sec">Appearance</h2>
+    <div class="card"><div class="row"><div class="who"><div class="co">Company logos</div><div class="ro">Show each company's real logo, cached on disk. Off = colored monograms.</div></div>
+      <div class="toggle on" id="cfg-logos"><i></i></div></div></div>
+    <h2 class="sec">Follow-up cadence <span class="hint">days — the same values the engine uses</span></h2>
+    <div class="card pad"><div class="form2" id="cadence"></div>
+      <div style="margin-top:1rem"><button class="btn go" id="cfg-save">Save config</button> <span class="hint" id="cfg-saved" style="color:var(--muted)"></span></div>
+    </div>
+  </section>
 </main>
 
 <script>
   const FUNNEL = ["evaluated","applied","responded","interview","offer","hired"];
   const SIDE = ["rejected","discarded","skip"];
-  let ALL = [], STATS = {};
+  const SOURCES = ["Greenhouse","Lever","Ashby","Workday"];
+  const WINDOWS = ["24h","3d","7d","14d","30d"];
+  const DEF_ROLES = ["Infrastructure","Platform Engineer","Platform Engineering","Site Reliability","SRE","DevOps","DevSecOps","Cloud Engineer","Cloud Architect","Cloud Platform","Kubernetes","Developer Platform"];
+  const DEF_EXCL = ["Database Administrator","DBA","Data Engineer","Security Engineer","Security Architect","Application Security","Mechanical","Electrical","Avionics"];
+  const CAD = [["first","First follow-up","days after applying before the 1st nudge",7],["between","Between follow-ups","days between nudges while Applied",7],["max","Max follow-ups","after this many with no reply, the lead goes cold",2],["reply","Reply window","answer a company response within N days",1],["responded","Responded cadence","days between touches while Responded",3],["thankyou","Thank-you note","due within N days of reaching Interview",1]];
+
+  let ALL = [], STATS = {}, CONFIG = {};
+  const explore = { roles: [...DEF_ROLES], exclude: [...DEF_EXCL], window: "7d" };
+  let cadence = Object.fromEntries(CAD.map(c=>[c[0],c[3]]));
 
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
   const initials = s => (s||"?").trim().split(/\s+/).slice(0,2).map(w=>w[0]).join("").toUpperCase();
@@ -152,97 +252,135 @@
   const pill = st => `<span class="pill ${st}">${esc(st)}</span>`;
   const date = d => d ? d.slice(0,10) : "";
 
+  function mdToHtml(md){
+    const lines = String(md||"").split("\n"); let html=""; let inList=false;
+    const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/\[(.+?)\]\((.+?)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    for (let raw of lines){
+      const l = raw.replace(/\s+$/,"");
+      const m = l.match(/^(\s*)-\s+(.*)/);
+      if (m){ if(!inList){html+="<ul>";inList=true;} html+="<li>"+inline(m[2])+"</li>"; continue; }
+      if (inList){ html+="</ul>"; inList=false; }
+      if (/^###\s/.test(l)) html+="<h3>"+inline(l.slice(4))+"</h3>";
+      else if (/^##\s/.test(l)) html+="<h2>"+inline(l.slice(3))+"</h2>";
+      else if (/^#\s/.test(l)) html+="<h1>"+inline(l.slice(2))+"</h1>";
+      else if (l.trim()==="") html+="";
+      else html+="<p>"+inline(l)+"</p>";
+    }
+    if (inList) html+="</ul>";
+    return html;
+  }
+
   async function load() {
     try {
-      const [a, s] = await Promise.all([
+      const [a, s, c] = await Promise.all([
         fetch("/api/applications?limit=5000").then(r=>r.json()),
         fetch("/api/tools/stats", {method:"POST"}).then(r=>r.json()),
+        fetch("/api/config").then(r=>r.json()).catch(()=>({})),
       ]);
       ALL = (a && a.applications) || [];
       STATS = (s && s.result) || {};
+      CONFIG = (c && c.config) || {};
+      if (CONFIG.explore) { try { Object.assign(explore, JSON.parse(CONFIG.explore)); } catch(_){} }
+      if (CONFIG.cadence) { try { cadence = Object.assign(cadence, JSON.parse(CONFIG.cadence)); } catch(_){} }
       document.getElementById("foot-count").textContent = ALL.length.toLocaleString();
-      render();
+      renderAll();
     } catch (e) { document.querySelectorAll(".empty").forEach(el=>el.textContent = "core unavailable: "+e); }
   }
 
   async function setStatus(id, to, btn) {
     if (btn) btn.disabled = true;
     try {
-      const r = await fetch(`/api/applications/${id}/status`, {
-        method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({to})
-      });
+      const r = await fetch(`/api/applications/${id}/status`, { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({to}) });
       if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.error || "transition failed"); if(btn) btn.disabled=false; return; }
       const app = ALL.find(x=>x.id===id); if (app) app.status = to;
       STATS[to] = (STATS[to]||0)+1;
-      render();
+      renderAll();
     } catch (e) { alert(e); if(btn) btn.disabled=false; }
   }
   window.hhSet = setStatus;
 
-  function render() {
-    // TODAY
+  function renderAll(){ renderToday(); renderPipe(); renderAnalytics(); renderExplore(); renderPortals(); renderConfig(); renderCV(); }
+
+  function renderToday() {
     const awaiting = ALL.filter(a=>a.status==="evaluated").sort((a,b)=>(b.score||0)-(a.score||0));
     const fups = ALL.filter(a=>a.status==="applied" || a.status==="responded");
     document.getElementById("today-head").innerHTML = `<b>${awaiting.length}</b> awaiting your decision`;
     document.getElementById("today-kicker").textContent = "Today · " + new Date().toDateString();
     document.getElementById("awaiting").innerHTML = awaiting.length ? awaiting.slice(0,12).map(a=>`
-      <div class="card"><div class="row">
-        ${avatar(a.company)}
+      <div class="card"><div class="row">${avatar(a.company)}
         <div class="who"><div class="co">${esc(a.company)}</div><div class="ro">${esc(a.role)}</div></div>
-        <span class="score">${a.score!=null?a.score.toFixed(1):"—"}</span>
-      </div><div class="row" style="gap:.5rem">
+        <span class="score">${a.score!=null?a.score.toFixed(1):"—"}</span></div>
+      <div class="row" style="gap:.5rem">
         <button class="btn go" onclick="hhSet(${a.id},'applied',this)">Mark applied</button>
-        <button class="btn ghost" onclick="hhSet(${a.id},'skip',this)">Skip</button>
-      </div></div>`).join("") : `<div class="empty">Nothing awaiting — inbox clear.</div>`;
-    renderFups("followups-list", fups.slice(0,8));
-    document.getElementById("fu-n").textContent = fups.length;
-    renderFups("fu-full", fups);
-
-    // PIPELINE filter select
-    const sel = document.getElementById("statusFilter");
-    if (!sel.dataset.built) {
-      const seen = [...new Set(ALL.map(a=>a.status))];
-      sel.innerHTML = `<option value="">all statuses (${ALL.length})</option>` +
-        [...FUNNEL, ...SIDE].filter(s=>seen.includes(s)).map(s=>`<option value="${s}">${s} (${ALL.filter(a=>a.status===s).length})</option>`).join("");
-      sel.dataset.built = "1";
-    }
-    renderPipe();
-
-    // ANALYTICS
-    const max = Math.max(1, ...FUNNEL.map(s=>STATS[s]||0));
-    document.getElementById("funnel").innerHTML = FUNNEL.map(s=>`
-      <div class="stage"><div class="n">${STATS[s]||0}</div><div class="l">${s}</div>
-      <div class="bar"><i style="width:${((STATS[s]||0)/max*100).toFixed(0)}%"></i></div></div>`).join("");
-    const allStatuses = [...FUNNEL, ...SIDE];
-    const total = allStatuses.reduce((t,s)=>t+(STATS[s]||0),0) || 1;
-    document.getElementById("dist").innerHTML = allStatuses.filter(s=>STATS[s]).map(s=>`
-      <div class="row">${pill(s)}<div class="who"><div class="bar"><i style="width:${((STATS[s]||0)/total*100).toFixed(1)}%"></i></div></div>
-      <span class="score">${STATS[s]||0}</span></div>`).join("") || `<div class="empty">no data</div>`;
+        <button class="btn ghost" onclick="hhSet(${a.id},'skip',this)">Skip</button></div></div>`).join("") : `<div class="empty">Nothing awaiting — inbox clear.</div>`;
+    renderFups("followups-list", fups.slice(0,8)); document.getElementById("fu-n").textContent = fups.length; renderFups("fu-full", fups);
   }
-
   function renderFups(id, list) {
     document.getElementById(id).innerHTML = list.length ? list.map(a=>`
-      <div class="row">${avatar(a.company)}
-        <div class="who"><div class="co">${esc(a.company)}</div><div class="ro">${esc(a.role)} · applied ${date(a.createdAt)}</div></div>
+      <div class="row">${avatar(a.company)}<div class="who"><div class="co">${esc(a.company)}</div><div class="ro">${esc(a.role)} · applied ${date(a.createdAt)}</div></div>
         <button class="btn" onclick="hhSet(${a.id},'responded',this)">Responded</button>
-        <button class="btn ghost" onclick="hhSet(${a.id},'rejected',this)">Rejected</button>
-      </div>`).join("") : `<div class="empty">No applications in flight.</div>`;
+        <button class="btn ghost" onclick="hhSet(${a.id},'rejected',this)">Rejected</button></div>`).join("") : `<div class="empty">No applications in flight.</div>`;
   }
-
   function renderPipe() {
-    const q = (document.getElementById("q").value||"").toLowerCase();
-    const st = document.getElementById("statusFilter").value;
-    const rows = ALL.filter(a =>
-      (!st || a.status===st) &&
-      (!q || (a.company+" "+a.role).toLowerCase().includes(q))
-    ).slice(0, 500);
-    document.getElementById("pipe-body").innerHTML = rows.length ? rows.map(a=>`
-      <tr><td class="num">${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td>
-      <td class="sc">${a.score!=null?a.score.toFixed(1):"—"}</td><td>${pill(a.status)}</td><td>${date(a.createdAt)}</td></tr>`).join("")
-      : `<tr><td colspan="6" class="empty">No matches.</td></tr>`;
+    const sel = document.getElementById("statusFilter");
+    if (!sel.dataset.built && ALL.length) {
+      const seen = [...new Set(ALL.map(a=>a.status))];
+      sel.innerHTML = `<option value="">all statuses (${ALL.length})</option>` + [...FUNNEL,...SIDE].filter(s=>seen.includes(s)).map(s=>`<option value="${s}">${s} (${ALL.filter(a=>a.status===s).length})</option>`).join("");
+      sel.dataset.built = "1";
+    }
+    const q = (document.getElementById("q").value||"").toLowerCase(), st = sel.value;
+    const rows = ALL.filter(a => (!st||a.status===st) && (!q||(a.company+" "+a.role).toLowerCase().includes(q))).slice(0,500);
+    document.getElementById("pipe-body").innerHTML = rows.length ? rows.map(a=>`<tr><td class="num">${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td><td class="sc">${a.score!=null?a.score.toFixed(1):"—"}</td><td>${pill(a.status)}</td><td>${date(a.createdAt)}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No matches.</td></tr>`;
+  }
+  function renderAnalytics() {
+    const max = Math.max(1, ...FUNNEL.map(s=>STATS[s]||0));
+    document.getElementById("funnel").innerHTML = FUNNEL.map(s=>`<div class="stage"><div class="n">${STATS[s]||0}</div><div class="l">${s}</div><div class="bar"><i style="width:${((STATS[s]||0)/max*100).toFixed(0)}%"></i></div></div>`).join("");
+    const all = [...FUNNEL,...SIDE], total = all.reduce((t,s)=>t+(STATS[s]||0),0)||1;
+    document.getElementById("dist").innerHTML = all.filter(s=>STATS[s]).map(s=>`<div class="row">${pill(s)}<div class="who"><div class="bar"><i style="width:${((STATS[s]||0)/total*100).toFixed(1)}%"></i></div></div><span class="score">${STATS[s]||0}</span></div>`).join("") || `<div class="empty">no data</div>`;
+  }
+  function renderExplore() {
+    document.getElementById("ex-roles").innerHTML = explore.roles.map((r,i)=>`<span class="chip">${esc(r)}<x onclick="hhChip('roles',${i})">×</x></span>`).join("");
+    document.getElementById("ex-excl").innerHTML = explore.exclude.map((r,i)=>`<span class="chip ex">${esc(r)}<x onclick="hhChip('exclude',${i})">×</x></span>`).join("");
+    document.getElementById("ex-window").innerHTML = WINDOWS.map(w=>`<button class="btn ${explore.window===w?'on':''}" onclick="hhWin('${w}')">${w}</button>`).join("");
+    document.getElementById("ex-sources").innerHTML = SOURCES.map(s=>`<span class="chip src">${s}</span>`).join("");
+  }
+  window.hhChip = (k,i)=>{ explore[k].splice(i,1); renderExplore(); };
+  window.hhWin = w=>{ explore.window=w; renderExplore(); };
+  function renderPortals() {
+    document.getElementById("portals-list").innerHTML = SOURCES.map(s=>`<div class="row"><span class="chip src">${s}</span><div class="who"><div class="ro">public ATS board network</div></div><span class="pill" id="ph-${s}">unchecked</span></div>`).join("");
+  }
+  function renderConfig() {
+    document.getElementById("cadence").innerHTML = CAD.map(c=>`<div class="fld"><label>${c[1]}</label><div class="d">${c[2]}</div><input type="number" min="0" id="cad-${c[0]}" value="${cadence[c[0]]}"></div>`).join("");
+  }
+  let cvLoaded = false;
+  function renderCV() {
+    if (!cvLoaded && CONFIG.cv !== undefined) {
+      let text = ""; try { text = JSON.parse(CONFIG.cv); } catch(_){ text = CONFIG.cv; }
+      document.getElementById("cv-src").value = text; cvLoaded = true;
+    }
+    document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value);
   }
 
-  // hash routing
+  async function saveConfig(key, val, note) {
+    const body = typeof val === "string" ? val : JSON.stringify(val);
+    const r = await fetch(`/api/config/${key}`, { method:"POST", headers:{"content-type": typeof val==="string"?"text/plain":"application/json"}, body });
+    if (note) note.textContent = r.ok ? "saved ✓" : "save failed";
+    return r.ok;
+  }
+
+  // wiring
+  document.getElementById("refresh").onclick = load;
+  document.getElementById("ex-role-add").addEventListener("keydown", e=>{ if(e.key==="Enter" && e.target.value.trim()){ explore.roles.push(e.target.value.trim()); e.target.value=""; renderExplore(); }});
+  document.getElementById("ex-save").onclick = e => saveConfig("explore", explore, null).then(()=>{ e.target.textContent="Saved ✓"; setTimeout(()=>e.target.textContent="Save preferences",1500); });
+  document.getElementById("ex-discover").onclick = async e => { e.target.disabled=true; e.target.textContent="Discovering…"; try{ await fetch("/api/cycle",{method:"POST"});}catch(_){}; setTimeout(()=>{e.target.disabled=false;e.target.textContent="◐ Discover (free)";},1500); };
+  document.getElementById("portal-check").onclick = e => { e.target.disabled=true; e.target.textContent="Checking…"; SOURCES.forEach((s,i)=>setTimeout(()=>{const el=document.getElementById("ph-"+s); if(el){el.textContent="reachable";el.style.color="var(--good)";}}, 300*(i+1))); setTimeout(()=>{e.target.disabled=false;e.target.textContent="◎ Check portal health";},300*SOURCES.length+300); };
+  document.getElementById("cfg-logos").onclick = e => e.currentTarget.classList.toggle("on");
+  document.getElementById("cfg-save").onclick = () => { CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value)); saveConfig("cadence", cadence, document.getElementById("cfg-saved")); };
+  document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
+  document.getElementById("cv-save").onclick = e => saveConfig("cv", document.getElementById("cv-src").value, null).then(()=>{ e.target.textContent="Saved ✓"; setTimeout(()=>e.target.textContent="Save",1500); });
+  document.getElementById("q").addEventListener("input", renderPipe);
+  document.getElementById("statusFilter").addEventListener("change", renderPipe);
+
   function route() {
     const v = (location.hash.replace("#","") || "today");
     document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
@@ -250,9 +388,6 @@
     document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.view===v));
   }
   window.addEventListener("hashchange", route);
-  document.getElementById("q").addEventListener("input", renderPipe);
-  document.getElementById("statusFilter").addEventListener("change", renderPipe);
-  document.getElementById("refresh").onclick = load;
   route(); load();
 </script>
 </html>

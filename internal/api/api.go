@@ -41,6 +41,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/applications/{id}/status", s.setStatus)
 	mux.HandleFunc("POST /api/scan/ingest", s.ingest)
 	mux.HandleFunc("POST /api/import/tracker", s.importTracker)
+	mux.HandleFunc("GET /api/config", s.getConfig)
+	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
 	mux.HandleFunc("GET /", s.index)
 	return mux
@@ -172,6 +174,43 @@ func (s *Server) importTracker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "parsed": len(rows), "imported": n})
+}
+
+func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	cfg, err := s.Store.GetAllConfig(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config": cfg})
+}
+
+// setConfig stores a config document under {key}. A JSON body is stored as-is;
+// any other body (e.g. raw markdown for cv) is stored as a JSON string.
+func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	doc := json.RawMessage(body)
+	if !json.Valid(body) {
+		enc, _ := json.Marshal(string(body))
+		doc = json.RawMessage(enc)
+	}
+	if err := s.Store.SetConfig(r.Context(), r.PathValue("key"), doc); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": r.PathValue("key")})
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
