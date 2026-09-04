@@ -119,17 +119,36 @@ func ParseTracker(md string) []TrackerRow {
 		if isSeparator(cells) {
 			continue
 		}
+		// Score and Status sit at the same index in both layouts.
 		r := TrackerRow{
-			Company: cell(cells, cols, "company"),
-			Role:    cell(cells, cols, "role"),
-			Score:   parseScore(cell(cells, cols, "score")),
-			Status:  normStatus(cell(cells, cols, "status")),
+			Score:  parseScore(cell(cells, cols, "score")),
+			Status: normStatus(cell(cells, cols, "status")),
 		}
 		r.Num, _ = strconv.Atoi(cell(cells, cols, "#"))
-		if d := strings.TrimSpace(cell(cells, cols, "date")); d != "" {
+
+		// The tracker mixes two layouts: standard rows carry a Date column
+		// (# | Date | Company | Role | ...); legacy migrated rows omit it
+		// (# | Company | Role | <state> | ...), shifting Company/Role one cell
+		// left. Detect per-row by whether the date-column cell is a real date.
+		dateIdx, hasDateCol := cols["date"]
+		companyIdx := cols["company"]
+		if d := strings.TrimSpace(cell(cells, cols, "date")); hasDateCol {
 			if ts, err := time.Parse("2006-01-02", d); err == nil {
 				r.Date, r.HasDate = ts, true
+				r.Company = cell(cells, cols, "company")
+				r.Role = cell(cells, cols, "role")
+			} else {
+				// legacy: no date — Company is where Date would be, Role next.
+				if dateIdx < len(cells) {
+					r.Company = strings.TrimSpace(cells[dateIdx])
+				}
+				if companyIdx < len(cells) {
+					r.Role = strings.TrimSpace(cells[companyIdx])
+				}
 			}
+		} else {
+			r.Company = cell(cells, cols, "company")
+			r.Role = cell(cells, cols, "role")
 		}
 		if r.Company == "" && r.Role == "" {
 			continue

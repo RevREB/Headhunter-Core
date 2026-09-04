@@ -9,10 +9,15 @@ func TestParseTracker(t *testing.T) {
 		"| 1 | 2026-08-20 | Acme | SRE Lead | 4.2/5 | Applied | | [r](reports/1.md) | hi |\n" +
 		"| 2 | 2026-08-19 | Globex | Platform Eng | — | Discarded | | | |\n" +
 		"| 3 | | Initech | Manager | 3/5 | SKIP | | | |\n" +
+		// legacy layout: no Date column; Company/Role shifted one cell left.
+		"| 4 | Boeing | Principal Architect | Evaluated | 1.5/5 | Discarded | [](r) | notes | x |\n" +
 		"\nTrailing prose after the table.\n"
 	rows := ParseTracker(md)
-	if len(rows) != 3 {
-		t.Fatalf("got %d rows, want 3", len(rows))
+	if len(rows) != 4 {
+		t.Fatalf("got %d rows, want 4", len(rows))
+	}
+	if r := rows[3]; r.Company != "Boeing" || r.Role != "Principal Architect" || r.Status != "discarded" || r.HasDate || r.Score == nil || *r.Score != 1.5 {
+		t.Errorf("legacy row mis-parsed: %+v", r)
 	}
 	if rows[0].Company != "Acme" || rows[0].Role != "SRE Lead" || rows[0].Status != "applied" {
 		t.Errorf("row0 = %+v", rows[0])
