@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/RevREB/Headhunter-Core/internal/store"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -39,6 +40,7 @@ type Operator struct {
 	namespace   string
 	catalogPath string
 	ingestURL   string
+	store       *store.Store // for recording/reading scan last-run
 }
 
 func env(k, def string) string {
@@ -49,8 +51,9 @@ func env(k, def string) string {
 }
 
 // New builds the operator from in-cluster config; returns an error (operator
-// disabled) when not running in a cluster.
-func New() (*Operator, error) {
+// disabled) when not running in a cluster. st is used to persist/read the scan
+// last-run (may be nil).
+func New(st *store.Store) (*Operator, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
@@ -64,6 +67,7 @@ func New() (*Operator, error) {
 		namespace:   env("POD_NAMESPACE", "headhunter"),
 		catalogPath: env("SCAN_CATALOG", "/etc/headhunter/scan-catalog.json"),
 		ingestURL:   env("SELF_INGEST_URL", "http://headhunter-core.headhunter.svc.cluster.local:8080/api/scan/ingest"),
+		store:       st,
 	}, nil
 }
 
@@ -94,7 +98,62 @@ func (o *Operator) RunCycle(ctx context.Context) (int, error) {
 		n++
 	}
 	log.Printf("operator: cycle launched %d/%d scrapers", n, len(cat.Scrapers))
+	if o.store != nil {
+		rec, _ := json.Marshal(map[string]any{"at": time.Now().UTC().Format(time.RFC3339), "launched": n})
+		if err := o.store.SetConfig(ctx, "scan_last_run", rec); err != nil {
+			log.Printf("operator: record last-run: %v", err)
+		}
+	}
 	return n, nil
+}
+
+// Status reports the operator's scan state: the persisted last-run plus the live
+// state of the current scan Jobs (so the UI/MCP can show it without kubectl).
+func (o *Operator) Status(ctx context.Context) (map[string]any, error) {
+	out := map[string]any{"running": false, "lastRun": nil, "lastLaunched": 0, "jobs": []any{}}
+	if o.store != nil {
+		if cfg, err := o.store.GetAllConfig(ctx); err == nil {
+			if raw, ok := cfg["scan_last_run"]; ok {
+				var lr struct {
+					At       string `json:"at"`
+					Launched int    `json:"launched"`
+				}
+				if json.Unmarshal(raw, &lr) == nil {
+					out["lastRun"] = lr.At
+					out["lastLaunched"] = lr.Launched
+				}
+			}
+		}
+	}
+	jl, err := o.cs.BatchV1().Jobs(o.namespace).List(ctx, metav1.ListOptions{LabelSelector: "app=headhunter-scan"})
+	if err != nil {
+		return out, err
+	}
+	jobs := []any{}
+	running := false
+	for _, j := range jl.Items {
+		state := "pending"
+		switch {
+		case j.Status.Active > 0:
+			state = "running"
+			running = true
+		case j.Status.Succeeded > 0:
+			state = "succeeded"
+		case j.Status.Failed > 0:
+			state = "failed"
+		}
+		entry := map[string]any{"ats": j.Labels["ats"], "state": state}
+		if j.Status.StartTime != nil {
+			entry["startedAt"] = j.Status.StartTime.Time.UTC().Format(time.RFC3339)
+		}
+		if j.Status.CompletionTime != nil {
+			entry["finishedAt"] = j.Status.CompletionTime.Time.UTC().Format(time.RFC3339)
+		}
+		jobs = append(jobs, entry)
+	}
+	out["jobs"] = jobs
+	out["running"] = running
+	return out, nil
 }
 
 func (o *Operator) launch(ctx context.Context, sc ScraperDef, keywords string) error {

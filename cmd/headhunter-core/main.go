@@ -63,7 +63,7 @@ func main() {
 	}
 
 	var cyc api.Cycler
-	if op, err := operator.New(); err != nil {
+	if op, err := operator.New(st); err != nil {
 		log.Printf("operator disabled: %v", err)
 	} else {
 		cyc = op

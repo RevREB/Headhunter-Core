@@ -35,6 +35,7 @@ var webFS embed.FS
 // stays decoupled from client-go.
 type Cycler interface {
 	RunCycle(ctx context.Context) (int, error)
+	Status(ctx context.Context) (map[string]any, error)
 }
 
 type Server struct {
@@ -63,6 +64,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/config", s.getConfig)
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
+	mux.HandleFunc("GET /api/scan/status", s.scanStatus)
 	mux.HandleFunc("POST /api/evaluate", s.evaluate)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("GET /icon.png", s.icon)
@@ -114,7 +116,8 @@ func (s *Server) tools(w http.ResponseWriter, _ *http.Request) {
 	empty := map[string]any{"type": "object", "properties": map[string]any{}}
 	writeJSON(w, http.StatusOK, map[string]any{"tools": []tool{
 		{Name: "stats", Description: "Application funnel counts by status", InputSchema: empty},
-		{Name: "cycle", Description: "Trigger a scan/evaluate cycle", InputSchema: empty},
+		{Name: "cycle", Description: "Trigger a scan cycle (launches one Job per catalog scraper)", InputSchema: empty},
+		{Name: "scan_status", Description: "Scan status: last run + live state of the current scan Jobs", InputSchema: empty},
 	}})
 }
 
@@ -133,6 +136,8 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": f})
 	case "cycle":
 		s.cycle(w, r)
+	case "scan_status":
+		s.scanStatus(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown tool"})
 	}
@@ -603,6 +608,21 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "deduped": deduped, "failed": failed})
+}
+
+func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
+	if s.Operator == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "operator": false, "running": false, "jobs": []any{}})
+		return
+	}
+	st, err := s.Operator.Status(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	st["ok"] = true
+	st["operator"] = true
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) cycle(w http.ResponseWriter, r *http.Request) {
