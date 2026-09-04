@@ -559,7 +559,7 @@
       const r = await fetch("/api/evaluate?limit=10", { method: "POST" });
       const d = await r.json();
       if (!r.ok) { btn.textContent = d.error || "failed"; }
-      else { btn.textContent = `✓ ${d.evaluated} scored, ${d.discarded} cut`; await load(); }
+      else { btn.textContent = `✓ ${d.evaluated} scored`; await load(); }
     } catch (err) { btn.textContent = "error"; }
     setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 3500);
   };

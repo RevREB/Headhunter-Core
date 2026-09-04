@@ -378,12 +378,6 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 	if len(cv) > 6000 {
 		cv = cv[:6000]
 	}
-	threshold := 3.0
-	if v := os.Getenv("EVAL_DISCARD_THRESHOLD"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			threshold = f
-		}
-	}
 	// Evaluate concurrently — each posting is an independent LLM round-trip, so a
 	// small worker pool turns an hours-long sequential sweep into minutes. Tunable
 	// via EVAL_CONCURRENCY (Bifrost is the limiter; retries absorb transient 429s).
@@ -401,11 +395,14 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 	if workers > 20 {
 		workers = 20
 	}
+	// The evaluator only RATES — every posting moves inbox -> evaluated with its
+	// score. Discarding (like applying or skipping) is the user's decision, made
+	// from the dashboard; the engine never auto-cuts a posting.
 	var (
-		mu                           sync.Mutex
-		evaluated, discarded, failed int
-		wg                           sync.WaitGroup
-		sem                          = make(chan struct{}, workers)
+		mu                sync.Mutex
+		evaluated, failed int
+		wg                sync.WaitGroup
+		sem               = make(chan struct{}, workers)
 	)
 	for _, a := range apps {
 		wg.Add(1)
@@ -422,11 +419,7 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 				mu.Unlock()
 				return
 			}
-			to := "evaluated"
-			if score < threshold {
-				to = "discarded"
-			}
-			if err := s.Store.SaveEvaluation(r.Context(), a.ID, score, to, report); err != nil {
+			if err := s.Store.SaveEvaluation(r.Context(), a.ID, score, "evaluated", report); err != nil {
 				log.Printf("evaluate: save app %d: %v", a.ID, err)
 				mu.Lock()
 				failed++
@@ -434,17 +427,13 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			mu.Lock()
-			if to == "evaluated" {
-				evaluated++
-			} else {
-				discarded++
-			}
+			evaluated++
 			mu.Unlock()
 		}(a)
 	}
 	wg.Wait()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "processed": len(apps), "evaluated": evaluated, "discarded": discarded, "failed": failed,
+		"ok": true, "processed": len(apps), "evaluated": evaluated, "failed": failed,
 	})
 }
 
