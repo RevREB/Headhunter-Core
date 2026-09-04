@@ -27,6 +27,7 @@ const (
 	StatusRejected  Status = "rejected"
 	StatusDiscarded Status = "discarded"
 	StatusSkip      Status = "skip"
+	StatusInbox     Status = "inbox"
 )
 
 // funnelRank maps the progression statuses to their 0..5 funnel position.
@@ -52,6 +53,12 @@ var terminalStatuses = map[Status]bool{
 // source status. A status absent from this map (or mapping to an empty set) has
 // no outgoing edges.
 var transitions = map[Status]map[Status]bool{
+	StatusInbox: {
+		StatusEvaluated: true,
+		StatusApplied:   true,
+		StatusSkip:      true,
+		StatusDiscarded: true,
+	},
 	StatusEvaluated: {
 		StatusApplied:   true,
 		StatusSkip:      true,
@@ -83,6 +90,7 @@ var transitions = map[Status]map[Status]bool{
 // allStatuses is the authoritative set of known statuses, used by Valid and
 // ParseStatus.
 var allStatuses = map[Status]bool{
+	StatusInbox:     true,
 	StatusEvaluated: true,
 	StatusApplied:   true,
 	StatusResponded: true,

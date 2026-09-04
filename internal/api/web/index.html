@@ -369,17 +369,17 @@
         <button class="btn" onclick="hhSet(${a.id},'responded',this)">Responded</button>
         <button class="btn ghost" onclick="hhSet(${a.id},'rejected',this)">Rejected</button></div>`).join("") : `<div class="empty">No applications in flight.</div>`;
   }
-  const PIPE_TABS = ["all", ...FUNNEL, ...SIDE];
-  let pipeTab = "all", pipeSort = { col: "createdAt", dir: -1 };
+  const PIPE_TABS = ["inbox", "all", ...FUNNEL, ...SIDE];
+  let pipeTab = "inbox", pipeSort = { col: "createdAt", dir: -1 };
   const avatarSm = co => `<span class="avatar" style="background:hsl(${hue(co)} 45% 38%)">${esc(initials(co))}</span>`;
   function scoreBadge(s){ if(s==null) return '<span class="sc-badge sc-lo">—</span>'; const c = s>=4?"sc-hi":(s>=3?"sc-mid":"sc-lo"); return `<span class="sc-badge ${c}">${s.toFixed(1)}</span>`; }
-  const dotColor = st => ({applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)"}[st]||"var(--muted)");
+  const dotColor = st => ({inbox:"var(--accent)",applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)"}[st]||"var(--muted)");
 
   function renderPipe() {
     // header + tabs
     document.getElementById("pipe-head").textContent = ALL.length.toLocaleString() + " tracked";
-    const counts = { all: ALL.length };
-    PIPE_TABS.slice(1).forEach(t => counts[t] = ALL.filter(a=>a.status===t).length);
+    const counts = {};
+    PIPE_TABS.forEach(t => counts[t] = (t==="all") ? ALL.length : ALL.filter(a=>a.status===t).length);
     document.getElementById("pipe-tabs").innerHTML = PIPE_TABS.map(t =>
       `<a class="${t===pipeTab?'on':''}" data-tab="${t}">${t.toUpperCase()}<b>${counts[t]||0}</b></a>`).join("");
     document.querySelectorAll("#pipe-tabs a").forEach(a => a.onclick = () => { pipeTab = a.dataset.tab; renderPipe(); });

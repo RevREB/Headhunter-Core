@@ -26,8 +26,8 @@ func (s *Store) IngestPosting(
 	var appID int64
 	// applications.url is UNIQUE — insert-or-fetch.
 	err = tx.QueryRow(ctx,
-		`INSERT INTO applications (url, company, role)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO applications (url, company, role, status)
+		 VALUES ($1, $2, $3, 'inbox'::application_status)
 		 ON CONFLICT (url) DO NOTHING
 		 RETURNING id`, normURL, company, role).Scan(&appID)
 	created := true
@@ -44,6 +44,11 @@ func (s *Store) IngestPosting(
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO postings (application_id, doc) VALUES ($1, $2)`,
 			appID, rawDoc); err != nil {
+			return IngestResult{}, err
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO status_events (application_id, to_status, source)
+			 VALUES ($1, 'inbox'::application_status, 'scan')`, appID); err != nil {
 			return IngestResult{}, err
 		}
 	}
