@@ -1,0 +1,16 @@
+# Go
+/bin/
+/out/
+*.test
+*.out
+
+# user data — NEVER commit (job-search data is private)
+data/
+config/
+cv.md
+*.pdf
+.env
+.env.*
+
+# stray build binaries
+/headhunter-core
