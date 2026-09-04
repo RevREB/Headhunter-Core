@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"net/http"
@@ -65,6 +64,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
 	mux.HandleFunc("GET /api/scan/status", s.scanStatus)
+	mux.HandleFunc("POST /api/scan/dedup", s.dedup)
 	mux.HandleFunc("POST /api/evaluate", s.evaluate)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("GET /icon.png", s.icon)
@@ -118,6 +118,7 @@ func (s *Server) tools(w http.ResponseWriter, _ *http.Request) {
 		{Name: "stats", Description: "Application funnel counts by status", InputSchema: empty},
 		{Name: "cycle", Description: "Trigger a scan cycle (launches one Job per catalog scraper)", InputSchema: empty},
 		{Name: "scan_status", Description: "Scan status: last run + live state of the current scan Jobs", InputSchema: empty},
+		{Name: "dedup", Description: "Collapse inbox near-duplicates (dry run; ?apply=true to commit)", InputSchema: empty},
 	}})
 }
 
@@ -138,6 +139,8 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 		s.cycle(w, r)
 	case "scan_status":
 		s.scanStatus(w, r)
+	case "dedup":
+		s.dedup(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown tool"})
 	}
@@ -506,7 +509,7 @@ func jobContext(a store.Application, doc json.RawMessage) string {
 			if p.PostedAt != "" {
 				fmt.Fprintf(&b, "Posted: %s\n", p.PostedAt)
 			}
-			if desc := extractDescription(p.Raw); desc != "" {
+			if desc := engine.ExtractDescription(p.Raw); desc != "" {
 				if len(desc) > 4000 {
 					desc = desc[:4000]
 				}
@@ -515,54 +518,6 @@ func jobContext(a store.Application, doc json.RawMessage) string {
 		}
 	}
 	return b.String()
-}
-
-// extractDescription best-effort pulls a job description out of an ATS raw record:
-// the longest string field whose key looks like a description/content/body,
-// HTML-stripped. Returns "" when the raw record has no such field.
-func extractDescription(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var m map[string]any
-	if json.Unmarshal(raw, &m) != nil {
-		return ""
-	}
-	best := ""
-	for k, v := range m {
-		s, ok := v.(string)
-		if !ok || s == "" {
-			continue
-		}
-		lk := strings.ToLower(k)
-		if strings.Contains(lk, "descript") || strings.Contains(lk, "content") || lk == "body" || lk == "text" || lk == "summary" {
-			if len(s) > len(best) {
-				best = s
-			}
-		}
-	}
-	return stripHTML(best)
-}
-
-// stripHTML removes tags, unescapes entities, and collapses whitespace.
-func stripHTML(s string) string {
-	if s == "" {
-		return ""
-	}
-	var b strings.Builder
-	inTag := false
-	for _, r := range s {
-		switch {
-		case r == '<':
-			inTag = true
-		case r == '>':
-			inTag = false
-			b.WriteByte(' ')
-		case !inTag:
-			b.WriteRune(r)
-		}
-	}
-	return strings.Join(strings.Fields(html.UnescapeString(b.String())), " ")
 }
 
 // extractJSON pulls the first {...} object out of a model reply (tolerating
@@ -587,27 +542,31 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected a JSON array of RawPosting"})
 		return
 	}
-	var created, deduped, failed int
+	var created, merged, deduped, failed int
 	for _, p := range postings {
 		normURL := engine.NormalizeURL(p.URL)
-		fp := engine.SimHash(p.Title + " " + p.Company + " " + string(p.Raw))
+		fp := engine.ContentFingerprint(p.Title, p.Raw)
+		key := engine.DedupKey(p.Company, p.Title)
 		trust, _ := engine.TrustScore(engine.PostingSignals{
 			HasApplyURL: p.URL != "", HasSalary: p.Comp != "", HasCompany: p.Company != "",
 			HasLocation: p.Location != "", DescriptionLen: len(p.Raw), PostedWithinDays: -1,
 		})
 		raw, _ := json.Marshal(p)
-		res, err := s.Store.IngestPosting(r.Context(), normURL, "", p.Company, p.Title, fp, trust, raw)
+		res, err := s.Store.IngestPosting(r.Context(), normURL, "", p.Company, p.Title, key, fp, trust, raw)
 		if err != nil {
 			failed++
 			continue
 		}
-		if res.Created {
+		switch {
+		case res.NearDup:
+			merged++ // new URL folded into an existing canonical role
+		case res.Created:
 			created++
-		} else {
-			deduped++
+		default:
+			deduped++ // exact-URL re-sighting
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "deduped": deduped, "failed": failed})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "merged": merged, "deduped": deduped, "failed": failed})
 }
 
 func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
@@ -623,6 +582,21 @@ func (s *Server) scanStatus(w http.ResponseWriter, r *http.Request) {
 	st["ok"] = true
 	st["operator"] = true
 	writeJSON(w, http.StatusOK, st)
+}
+
+// dedup collapses existing inbox near-duplicates. Dry run by default; pass
+// ?apply=true to commit (sets canonical_id on the folded rows).
+func (s *Server) dedup(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	rep, err := s.Store.DedupInbox(r.Context(), r.URL.Query().Get("apply") == "true", 0)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "report": rep})
 }
 
 func (s *Server) cycle(w http.ResponseWriter, r *http.Request) {

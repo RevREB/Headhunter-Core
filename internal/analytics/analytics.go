@@ -17,8 +17,10 @@ func New(pool *pgxpool.Pool) *Analytics { return &Analytics{Pool: pool} }
 
 // Funnel returns the count of applications per status.
 func (a *Analytics) Funnel(ctx context.Context) (map[string]int, error) {
+	// canonical_id IS NULL excludes near-duplicate rows so the funnel counts
+	// distinct roles, matching the worklist.
 	rows, err := a.Pool.Query(ctx,
-		`SELECT status::text, count(*) FROM applications GROUP BY status`)
+		`SELECT status::text, count(*) FROM applications WHERE canonical_id IS NULL GROUP BY status`)
 	if err != nil {
 		return nil, err
 	}

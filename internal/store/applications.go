@@ -96,10 +96,12 @@ func (s *Store) ListApplications(ctx context.Context, limit int, status string) 
 	if limit <= 0 || limit > 5000 {
 		limit = 100
 	}
-	q := `SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at FROM applications`
+	// canonical_id IS NULL hides near-duplicate rows (multi-location listings /
+	// reposts collapsed into their canonical role).
+	q := `SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at FROM applications WHERE canonical_id IS NULL`
 	args := []any{}
 	if status != "" {
-		q += ` WHERE status = $1::application_status`
+		q += ` AND status = $1::application_status`
 		args = append(args, status)
 	}
 	q += fmt.Sprintf(` ORDER BY created_at DESC LIMIT %d`, limit)
