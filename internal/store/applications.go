@@ -2,9 +2,16 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
+
+// ErrNotFound is returned when a requested application does not exist.
+var ErrNotFound = errors.New("application not found")
 
 // Application is a row of the tracker.
 type Application struct {
@@ -15,6 +22,72 @@ type Application struct {
 	Score     *float64  `json:"score"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+// StatusEvent is one entry in an application's transition ledger.
+type StatusEvent struct {
+	From   *string   `json:"from"`
+	To     string    `json:"to"`
+	Source string    `json:"source"`
+	Note   string    `json:"note"`
+	At     time.Time `json:"at"`
+}
+
+// ApplicationDetail is the full record for one application: its row plus the
+// latest raw posting, the latest evaluation report, and its status history.
+type ApplicationDetail struct {
+	Application
+	UpdatedAt time.Time       `json:"updatedAt"`
+	Posting   json.RawMessage `json:"posting"` // raw scraped posting doc, or null
+	Report    json.RawMessage `json:"report"`  // latest eval report, or null
+	Events    []StatusEvent   `json:"events"`
+}
+
+// GetApplication returns the full record for one application. Returns
+// ErrNotFound when the id does not exist. Posting/Report are nil when absent.
+func (s *Store) GetApplication(ctx context.Context, id int64) (*ApplicationDetail, error) {
+	var d ApplicationDetail
+	var score *float64
+	err := s.Pool.QueryRow(ctx,
+		`SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at, updated_at
+		 FROM applications WHERE id=$1`, id).
+		Scan(&d.ID, &d.URL, &d.Company, &d.Role, &score, &d.Status, &d.CreatedAt, &d.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	d.Score = score
+
+	// latest posting + report (both optional)
+	var posting, report []byte
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT doc FROM postings WHERE application_id=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&posting); err == nil {
+		d.Posting = posting
+	}
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT doc FROM reports WHERE application_id=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&report); err == nil {
+		d.Report = report
+	}
+
+	// status history (oldest first)
+	rows, err := s.Pool.Query(ctx,
+		`SELECT from_status::text, to_status::text, coalesce(source,''), coalesce(note,''), at
+		 FROM status_events WHERE application_id=$1 ORDER BY at ASC, id ASC`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	d.Events = []StatusEvent{}
+	for rows.Next() {
+		var ev StatusEvent
+		if err := rows.Scan(&ev.From, &ev.To, &ev.Source, &ev.Note, &ev.At); err != nil {
+			return nil, err
+		}
+		d.Events = append(d.Events, ev)
+	}
+	return &d, rows.Err()
 }
 
 // ListApplications returns applications newest-first, optionally filtered by

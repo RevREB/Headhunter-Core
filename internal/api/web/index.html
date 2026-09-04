@@ -144,6 +144,22 @@
   .co-cell { display: flex; align-items: center; gap: .5rem; }
   .co-cell .avatar { width: 24px; height: 24px; border-radius: 6px; font-size: .62rem; }
   #view-pipeline td { vertical-align: top; }
+  #pipe-body tr { cursor: pointer; }
+  #pipe-body tr:hover { background: var(--panel2); }
+  .clickable { cursor: pointer; }
+  .clickable:hover .co { color: var(--accent); }
+  /* job detail */
+  .jd-list { margin: .3rem 0 .6rem 1.1rem; padding: 0; }
+  .jd-list li { margin: .2rem 0; }
+  .jd-list.bad li { color: var(--bad); }
+  .meta-grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .meta-grid .mrow { display: flex; gap: .6rem; padding: .55rem .9rem; border-bottom: 1px solid var(--line); }
+  .meta-grid .mrow:nth-last-child(-n+1) { border-bottom: 0; }
+  .meta-grid .mk { color: var(--muted); width: 8rem; flex: none; font-size: .82rem; }
+  .meta-grid .mv { min-width: 0; word-break: break-word; }
+  .meta-grid .mv a { color: var(--accent); }
+  pre.raw { margin: 0; max-height: 340px; overflow: auto; font-family: ui-monospace, monospace; font-size: .78rem; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+  @media (max-width: 720px) { .meta-grid { grid-template-columns: 1fr; } }
 </style>
 
 <aside>
@@ -220,6 +236,11 @@
       </tr></thead>
       <tbody id="pipe-body"><tr><td colspan="5" class="empty">loading…</td></tr></tbody>
     </table></div>
+  </section>
+
+  <!-- JOB DETAIL -->
+  <section class="view" id="view-job">
+    <div id="job-body"><div class="empty">loading…</div></div>
   </section>
 
   <!-- FOLLOW-UPS -->
@@ -346,6 +367,7 @@
       const app = ALL.find(x=>x.id===id); if (app) app.status = to;
       STATS[to] = (STATS[to]||0)+1;
       renderAll();
+      if (location.hash.startsWith("#job/")) loadJob(location.hash.split("/")[1]);
     } catch (e) { alert(e); if(btn) btn.disabled=false; }
   }
   window.hhSet = setStatus;
@@ -358,7 +380,7 @@
     document.getElementById("today-head").innerHTML = `<b>${awaiting.length}</b> awaiting your decision`;
     document.getElementById("today-kicker").textContent = "Today · " + new Date().toDateString();
     document.getElementById("awaiting").innerHTML = awaiting.length ? awaiting.slice(0,12).map(a=>`
-      <div class="card"><div class="row">${avatar(a.company)}
+      <div class="card"><div class="row clickable" onclick="location.hash='#job/${a.id}'" title="Open job record">${avatar(a.company)}
         <div class="who"><div class="co">${esc(a.company)}</div><div class="ro">${esc(a.role)}</div></div>
         <span class="score">${a.score!=null?a.score.toFixed(1):"—"}</span></div>
       <div class="row" style="gap:.5rem">
@@ -368,7 +390,7 @@
   }
   function renderFups(id, list) {
     document.getElementById(id).innerHTML = list.length ? list.map(a=>`
-      <div class="row">${avatar(a.company)}<div class="who"><div class="co">${esc(a.company)}</div><div class="ro">${esc(a.role)} · applied ${date(a.createdAt)}</div></div>
+      <div class="row">${avatar(a.company)}<div class="who clickable" onclick="location.hash='#job/${a.id}'" title="Open job record"><div class="co">${esc(a.company)}</div><div class="ro">${esc(a.role)} · applied ${date(a.createdAt)}</div></div>
         <button class="btn" onclick="hhSet(${a.id},'responded',this)">Responded</button>
         <button class="btn ghost" onclick="hhSet(${a.id},'rejected',this)">Rejected</button></div>`).join("") : `<div class="empty">No applications in flight.</div>`;
   }
@@ -401,7 +423,7 @@
       th.querySelector(".arr").textContent = th.dataset.sort===col ? (dir>0?"▲":"▼") : "";
     });
     document.getElementById("pipe-body").innerHTML = rows.length ? rows.slice(0,800).map(a=>`
-      <tr>
+      <tr onclick="location.hash='#job/${a.id}'" title="Open job record">
         <td><div class="co-cell">${avatarSm(a.company)}<span>${esc(a.company)}</span></div></td>
         <td>${esc(a.role)}</td>
         <td>${scoreBadge(a.score)}</td>
@@ -409,6 +431,79 @@
         <td style="white-space:nowrap">${date(a.createdAt)}</td>
       </tr>`).join("") : `<tr><td colspan="5" class="empty">No matches.</td></tr>`;
   }
+  // ---- job detail ----
+  const fmtDateTime = s => { if(!s) return ""; const dt = new Date(s); return isNaN(dt) ? s : dt.toLocaleString(); };
+  function jobList(title, arr, cls){
+    if (!Array.isArray(arr) || !arr.length) return "";
+    return `<h2 class="sec">${title}</h2><ul class="jd-list ${cls||''}">` + arr.map(x=>`<li>${esc(x)}</li>`).join("") + `</ul>`;
+  }
+  async function loadJob(id){
+    const body = document.getElementById("job-body");
+    body.innerHTML = `<div class="empty">loading job ${esc(id)}…</div>`;
+    try {
+      const r = await fetch(`/api/applications/${encodeURIComponent(id)}`);
+      if (!r.ok){ body.innerHTML = `<div class="topbar" style="justify-content:flex-start"><a class="btn ghost" href="#pipeline">← Pipeline</a></div><div class="empty">${r.status===404?"No such job.":"failed to load ("+r.status+")"}</div>`; return; }
+      renderJob((await r.json()).application);
+    } catch(e){ body.innerHTML = `<div class="empty">error: ${esc(e)}</div>`; }
+  }
+  function renderJob(d){
+    const posting = d.posting || {}, report = d.report || null;
+    const sc = d.score!=null ? d.score.toFixed(1) : "—";
+    const scCls = d.score>=4?"sc-hi":(d.score>=3?"sc-mid":"sc-lo");
+    const meta = [];
+    if (posting.location) meta.push(["Location", posting.location]);
+    if (posting.comp) meta.push(["Compensation", posting.comp]);
+    if (posting.postedAt) meta.push(["Posted", posting.postedAt]);
+    if (d.url) meta.push(["Posting URL", `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a>`, true]);
+    meta.push(["Created", fmtDateTime(d.createdAt)]);
+    if (d.updatedAt) meta.push(["Updated", fmtDateTime(d.updatedAt)]);
+
+    const acts = [];
+    if (d.status==="inbox" || d.status==="evaluated"){
+      acts.push(`<button class="btn go" onclick="hhSet(${d.id},'applied',this)">Mark applied</button>`);
+      acts.push(`<button class="btn ghost" onclick="hhSet(${d.id},'skip',this)">Skip</button>`);
+    }
+    if (d.status==="applied" || d.status==="responded"){
+      acts.push(`<button class="btn" onclick="hhSet(${d.id},'responded',this)">Responded</button>`);
+      acts.push(`<button class="btn" onclick="hhSet(${d.id},'interview',this)">Interview</button>`);
+      acts.push(`<button class="btn ghost" onclick="hhSet(${d.id},'rejected',this)">Rejected</button>`);
+    }
+    if (d.url) acts.push(`<a class="btn" href="${esc(d.url)}" target="_blank" rel="noopener">Open posting ↗</a>`);
+
+    let reportHtml = "";
+    if (report){
+      reportHtml = `<div class="card pad">
+        <h2 class="sec" style="margin-top:0">Evaluation${report.score!=null?` <span class="hint">score ${Number(report.score).toFixed(1)}</span>`:""}</h2>
+        ${report.verdict?`<p>${esc(report.verdict)}</p>`:""}
+        ${jobList("Strengths", report.strengths)}
+        ${jobList("Concerns", report.concerns)}
+        ${jobList("Hard stops", report.hard_stops, "bad")}</div>`;
+    } else if (d.status==="inbox"){
+      reportHtml = `<div class="card pad"><p class="hint" style="color:var(--muted)">Not yet evaluated — <a href="#pipeline" style="color:var(--accent)">evaluate it from the Pipeline</a>.</p></div>`;
+    }
+
+    const rawHtml = d.posting ? `<h2 class="sec">Raw posting</h2><div class="card pad"><pre class="raw">${esc(JSON.stringify(d.posting, null, 2))}</pre></div>` : "";
+    const hist = (d.events||[]).map(e=>`<div class="row"><span class="dot" style="background:${dotColor(e.to)}"></span><div class="who"><div class="co">${esc(e.from?e.from+" → ":"")}${esc(e.to)}</div><div class="ro">${esc(e.source||"scan")} · ${fmtDateTime(e.at)}${e.note?" · "+esc(e.note):""}</div></div></div>`).join("");
+
+    document.getElementById("job-body").innerHTML = `
+      <div class="topbar" style="justify-content:flex-start;margin-bottom:1rem"><a class="btn ghost" href="#pipeline">← Pipeline</a></div>
+      <div class="hero" style="padding-top:0">
+        <div style="display:flex;align-items:center;gap:.8rem">
+          ${avatar(d.company)}
+          <div><div class="kicker" style="text-transform:none;letter-spacing:0">${pill(d.status)}</div>
+          <h1 style="margin:.2rem 0 0">${esc(d.company)}</h1></div>
+          <span class="sc-badge ${scCls}" style="margin-left:auto;font-size:1rem;padding:.25rem .6rem">${sc}</span>
+        </div>
+        <p style="font-size:1.05rem;color:var(--ink);margin-top:.6rem">${esc(d.role)}</p>
+      </div>
+      ${acts.length?`<div class="toolbar">${acts.join("")}</div>`:""}
+      <div class="card"><div class="meta-grid">${meta.map(m=>`<div class="mrow"><div class="mk">${esc(m[0])}</div><div class="mv">${m[2]?m[1]:esc(m[1])}</div></div>`).join("")}</div></div>
+      ${reportHtml}
+      ${rawHtml}
+      <h2 class="sec">History</h2>
+      <div class="card">${hist||'<div class="empty">no events</div>'}</div>`;
+  }
+
   function renderAnalytics() {
     const max = Math.max(1, ...FUNNEL.map(s=>STATS[s]||0));
     document.getElementById("funnel").innerHTML = FUNNEL.map(s=>`<div class="stage"><div class="n">${STATS[s]||0}</div><div class="l">${s}</div><div class="bar"><i style="width:${((STATS[s]||0)/max*100).toFixed(0)}%"></i></div></div>`).join("");
@@ -518,8 +613,15 @@
   askInput.addEventListener("keydown", e=>{ if(e.key==="Enter") askSend(); });
 
   function route() {
-    const v = (location.hash.replace("#","") || "today");
+    const [v, arg] = (location.hash.replace(/^#/,"") || "today").split("/");
     document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
+    if (v === "job" && arg) {
+      document.getElementById("view-job").classList.add("active");
+      document.querySelectorAll("nav a").forEach(a=>a.classList.remove("active"));
+      loadJob(arg);
+      window.scrollTo(0,0);
+      return;
+    }
     document.getElementById("view-"+v)?.classList.add("active");
     document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.view===v));
   }

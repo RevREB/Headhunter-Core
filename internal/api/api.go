@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,6 +52,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tools", s.tools)
 	mux.HandleFunc("POST /api/tools/{name}", s.callTool)
 	mux.HandleFunc("GET /api/applications", s.listApplications)
+	mux.HandleFunc("GET /api/applications/{id}", s.getApplication)
 	mux.HandleFunc("POST /api/applications/{id}/status", s.setStatus)
 	mux.HandleFunc("POST /api/scan/ingest", s.ingest)
 	mux.HandleFunc("POST /api/import/tracker", s.importTracker)
@@ -149,6 +151,28 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applications": apps})
+}
+
+func (s *Server) getApplication(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	d, err := s.Store.GetApplication(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "application": d})
 }
 
 func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
