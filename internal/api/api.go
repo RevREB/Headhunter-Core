@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RevREB/Headhunter-Core/internal/analytics"
@@ -360,8 +361,8 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	if limit > 25 {
-		limit = 25
+	if limit > 300 {
+		limit = 300
 	}
 	apps, err := s.Store.ListApplications(r.Context(), limit, "inbox")
 	if err != nil {
@@ -383,30 +384,65 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 			threshold = f
 		}
 	}
-	var evaluated, discarded, failed int
-	for _, a := range apps {
-		doc, _ := s.Store.GetPostingDoc(r.Context(), a.ID)
-		score, report, err := s.evalOne(r.Context(), cv, a, doc)
-		if err != nil {
-			log.Printf("evaluate: app %d %s / %s: %v", a.ID, a.Company, a.Role, err)
-			failed++
-			continue
-		}
-		to := "evaluated"
-		if score < threshold {
-			to = "discarded"
-		}
-		if err := s.Store.SaveEvaluation(r.Context(), a.ID, score, to, report); err != nil {
-			log.Printf("evaluate: save app %d: %v", a.ID, err)
-			failed++
-			continue
-		}
-		if to == "evaluated" {
-			evaluated++
-		} else {
-			discarded++
+	// Evaluate concurrently — each posting is an independent LLM round-trip, so a
+	// small worker pool turns an hours-long sequential sweep into minutes. Tunable
+	// via EVAL_CONCURRENCY (Bifrost is the limiter; retries absorb transient 429s).
+	workers := 6
+	if v := os.Getenv("EVAL_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			workers = n
 		}
 	}
+	if v := r.URL.Query().Get("workers"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			workers = n
+		}
+	}
+	if workers > 20 {
+		workers = 20
+	}
+	var (
+		mu                           sync.Mutex
+		evaluated, discarded, failed int
+		wg                           sync.WaitGroup
+		sem                          = make(chan struct{}, workers)
+	)
+	for _, a := range apps {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(a store.Application) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			doc, _ := s.Store.GetPostingDoc(r.Context(), a.ID)
+			score, report, err := s.evalOne(r.Context(), cv, a, doc)
+			if err != nil {
+				log.Printf("evaluate: app %d %s / %s: %v", a.ID, a.Company, a.Role, err)
+				mu.Lock()
+				failed++
+				mu.Unlock()
+				return
+			}
+			to := "evaluated"
+			if score < threshold {
+				to = "discarded"
+			}
+			if err := s.Store.SaveEvaluation(r.Context(), a.ID, score, to, report); err != nil {
+				log.Printf("evaluate: save app %d: %v", a.ID, err)
+				mu.Lock()
+				failed++
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			if to == "evaluated" {
+				evaluated++
+			} else {
+				discarded++
+			}
+			mu.Unlock()
+		}(a)
+	}
+	wg.Wait()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "processed": len(apps), "evaluated": evaluated, "discarded": discarded, "failed": failed,
 	})
