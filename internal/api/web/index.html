@@ -126,6 +126,23 @@
   .ask-in { display: flex; gap: .4rem; padding: .6rem; border-top: 1px solid var(--line); }
   .ask-in input { flex: 1; }
   .ask-hint { align-self: center; color: var(--muted); font-size: .78rem; text-align: center; }
+  /* pipeline tabs + table */
+  .tabs { display: flex; gap: 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); margin-bottom: .8rem; }
+  .tabs a { padding: .45rem .7rem; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; font-size: .82rem; white-space: nowrap; }
+  .tabs a:hover { color: var(--ink); }
+  .tabs a.on { color: var(--accent); border-bottom-color: var(--accent); }
+  .tabs a b { font-weight: 400; font-size: .72rem; margin-left: .3rem; opacity: .7; }
+  .sc-badge { padding: .1rem .4rem; border-radius: 5px; font-weight: 650; font-variant-numeric: tabular-nums; font-size: .8rem; }
+  .sc-hi { background: color-mix(in srgb, var(--good) 24%, transparent); color: var(--good); }
+  .sc-mid { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+  .sc-lo { background: var(--chip); color: var(--muted); }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: .45rem; vertical-align: middle; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--ink); }
+  th .arr { font-size: .7rem; margin-left: .2rem; }
+  .co-cell { display: flex; align-items: center; gap: .5rem; }
+  .co-cell .avatar { width: 24px; height: 24px; border-radius: 6px; font-size: .62rem; }
+  #view-pipeline td { vertical-align: top; }
 </style>
 
 <aside>
@@ -184,11 +201,20 @@
 
   <!-- PIPELINE -->
   <section class="view" id="view-pipeline">
-    <div class="hero"><div class="kicker">Pipeline</div><h1>The <b>full</b> tracker</h1></div>
-    <div class="toolbar"><input class="grow" id="q" placeholder="filter by company or role…"><select id="statusFilter"></select></div>
+    <div class="hero" style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap">
+      <div><div class="kicker">Pipeline</div><h1 id="pipe-head">The tracker</h1></div>
+      <input class="grow" id="q" placeholder="Search company or role…" style="max-width:20rem">
+    </div>
+    <div class="tabs" id="pipe-tabs"></div>
     <div class="scroll"><table>
-      <thead><tr><th>#</th><th>Company</th><th>Role</th><th>Score</th><th>Status</th><th>Added</th></tr></thead>
-      <tbody id="pipe-body"><tr><td colspan="6" class="empty">loading…</td></tr></tbody>
+      <thead><tr>
+        <th class="sortable" data-sort="company">Company<span class="arr"></span></th>
+        <th class="sortable" data-sort="role">Role<span class="arr"></span></th>
+        <th class="sortable" data-sort="score">Score<span class="arr"></span></th>
+        <th class="sortable" data-sort="status">Status<span class="arr"></span></th>
+        <th class="sortable" data-sort="createdAt">Date<span class="arr"></span></th>
+      </tr></thead>
+      <tbody id="pipe-body"><tr><td colspan="5" class="empty">loading…</td></tr></tbody>
     </table></div>
   </section>
 
@@ -342,16 +368,42 @@
         <button class="btn" onclick="hhSet(${a.id},'responded',this)">Responded</button>
         <button class="btn ghost" onclick="hhSet(${a.id},'rejected',this)">Rejected</button></div>`).join("") : `<div class="empty">No applications in flight.</div>`;
   }
+  const PIPE_TABS = ["all", ...FUNNEL, ...SIDE];
+  let pipeTab = "all", pipeSort = { col: "createdAt", dir: -1 };
+  const avatarSm = co => `<span class="avatar" style="background:hsl(${hue(co)} 45% 38%)">${esc(initials(co))}</span>`;
+  function scoreBadge(s){ if(s==null) return '<span class="sc-badge sc-lo">—</span>'; const c = s>=4?"sc-hi":(s>=3?"sc-mid":"sc-lo"); return `<span class="sc-badge ${c}">${s.toFixed(1)}</span>`; }
+  const dotColor = st => ({applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)"}[st]||"var(--muted)");
+
   function renderPipe() {
-    const sel = document.getElementById("statusFilter");
-    if (!sel.dataset.built && ALL.length) {
-      const seen = [...new Set(ALL.map(a=>a.status))];
-      sel.innerHTML = `<option value="">all statuses (${ALL.length})</option>` + [...FUNNEL,...SIDE].filter(s=>seen.includes(s)).map(s=>`<option value="${s}">${s} (${ALL.filter(a=>a.status===s).length})</option>`).join("");
-      sel.dataset.built = "1";
-    }
-    const q = (document.getElementById("q").value||"").toLowerCase(), st = sel.value;
-    const rows = ALL.filter(a => (!st||a.status===st) && (!q||(a.company+" "+a.role).toLowerCase().includes(q))).slice(0,500);
-    document.getElementById("pipe-body").innerHTML = rows.length ? rows.map(a=>`<tr><td class="num">${a.id}</td><td>${esc(a.company)}</td><td>${esc(a.role)}</td><td class="sc">${a.score!=null?a.score.toFixed(1):"—"}</td><td>${pill(a.status)}</td><td>${date(a.createdAt)}</td></tr>`).join("") : `<tr><td colspan="6" class="empty">No matches.</td></tr>`;
+    // header + tabs
+    document.getElementById("pipe-head").textContent = ALL.length.toLocaleString() + " tracked";
+    const counts = { all: ALL.length };
+    PIPE_TABS.slice(1).forEach(t => counts[t] = ALL.filter(a=>a.status===t).length);
+    document.getElementById("pipe-tabs").innerHTML = PIPE_TABS.map(t =>
+      `<a class="${t===pipeTab?'on':''}" data-tab="${t}">${t.toUpperCase()}<b>${counts[t]||0}</b></a>`).join("");
+    document.querySelectorAll("#pipe-tabs a").forEach(a => a.onclick = () => { pipeTab = a.dataset.tab; renderPipe(); });
+
+    // filter + sort
+    const q = (document.getElementById("q").value||"").toLowerCase();
+    let rows = ALL.filter(a => (pipeTab==="all"||a.status===pipeTab) && (!q||(a.company+" "+a.role).toLowerCase().includes(q)));
+    const { col, dir } = pipeSort;
+    rows.sort((a,b) => {
+      let va = a[col], vb = b[col];
+      if (col === "score") { va = va==null?-1:va; vb = vb==null?-1:vb; }
+      else { va = (va??"").toString().toLowerCase(); vb = (vb??"").toString().toLowerCase(); }
+      return (va<vb?-1:va>vb?1:0) * dir;
+    });
+    document.querySelectorAll("#view-pipeline th.sortable").forEach(th => {
+      th.querySelector(".arr").textContent = th.dataset.sort===col ? (dir>0?"▲":"▼") : "";
+    });
+    document.getElementById("pipe-body").innerHTML = rows.length ? rows.slice(0,800).map(a=>`
+      <tr>
+        <td><div class="co-cell">${avatarSm(a.company)}<span>${esc(a.company)}</span></div></td>
+        <td>${esc(a.role)}</td>
+        <td>${scoreBadge(a.score)}</td>
+        <td><span class="dot" style="background:${dotColor(a.status)}"></span>${esc(a.status)}</td>
+        <td style="white-space:nowrap">${date(a.createdAt)}</td>
+      </tr>`).join("") : `<tr><td colspan="5" class="empty">No matches.</td></tr>`;
   }
   function renderAnalytics() {
     const max = Math.max(1, ...FUNNEL.map(s=>STATS[s]||0));
@@ -400,7 +452,11 @@
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
   document.getElementById("cv-save").onclick = e => saveConfig("cv", document.getElementById("cv-src").value, null).then(()=>{ e.target.textContent="Saved ✓"; setTimeout(()=>e.target.textContent="Save",1500); });
   document.getElementById("q").addEventListener("input", renderPipe);
-  document.getElementById("statusFilter").addEventListener("change", renderPipe);
+  document.querySelectorAll("#view-pipeline th.sortable").forEach(th => th.addEventListener("click", () => {
+    const c = th.dataset.sort;
+    pipeSort = { col: c, dir: pipeSort.col===c ? -pipeSort.dir : ((c==="score"||c==="createdAt") ? -1 : 1) };
+    renderPipe();
+  }));
 
   // ---- assistant ----
   const askMsgs = document.getElementById("ask-msgs");
@@ -415,7 +471,7 @@
     return text.replace(/<<act:(\w+)\s*(\{[^}]*\})?>>/g, (m,name,json)=>{
       let arg={}; try{ arg=json?JSON.parse(json):{}; }catch(_){}
       if(name==="navigate" && arg.view) location.hash="#"+arg.view;
-      else if(name==="filter" && arg.status){ location.hash="#pipeline"; const sel=document.getElementById("statusFilter"); if(sel){ sel.value=arg.status; renderPipe(); } }
+      else if(name==="filter" && arg.status){ location.hash="#pipeline"; pipeTab=arg.status; renderPipe(); }
       return "";
     }).trim();
   }
