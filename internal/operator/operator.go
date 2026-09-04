@@ -135,7 +135,11 @@ func (o *Operator) launch(ctx context.Context, sc ScraperDef, keywords string) e
 					Containers: []corev1.Container{{
 						Name:  "scraper",
 						Image: sc.Image,
-						Env:   envs,
+						// Clean-pull every cycle: with a moving tag (:latest) this
+						// re-checks the registry digest and pulls only when the SHA
+						// changed, so a freshly-built scraper rolls out on the next scan.
+						ImagePullPolicy: corev1.PullAlways,
+						Env:             envs,
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
 								corev1.ResourceCPU:    resource.MustParse("25m"),
