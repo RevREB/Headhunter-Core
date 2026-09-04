@@ -1,6 +1,27 @@
 package store
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// GetPostingDoc returns the latest raw posting document for an application, or
+// nil when none exists (e.g. imported tracker rows have no scraped posting).
+func (s *Store) GetPostingDoc(ctx context.Context, id int64) (json.RawMessage, error) {
+	var doc []byte
+	err := s.Pool.QueryRow(ctx,
+		`SELECT doc FROM postings WHERE application_id=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&doc)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return doc, nil
+}
 
 // IngestResult reports what happened to one scraped posting.
 type IngestResult struct {

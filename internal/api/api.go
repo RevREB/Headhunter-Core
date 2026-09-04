@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -382,7 +383,8 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 	}
 	var evaluated, discarded, failed int
 	for _, a := range apps {
-		score, report, err := s.evalOne(r.Context(), cv, a)
+		doc, _ := s.Store.GetPostingDoc(r.Context(), a.ID)
+		score, report, err := s.evalOne(r.Context(), cv, a, doc)
 		if err != nil {
 			failed++
 			continue
@@ -406,14 +408,15 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) evalOne(ctx context.Context, cv string, a store.Application) (float64, json.RawMessage, error) {
+func (s *Server) evalOne(ctx context.Context, cv string, a store.Application, postingDoc json.RawMessage) (float64, json.RawMessage, error) {
 	sys := "You are a precise, calibrated job-fit evaluator for a candidate's job search. " +
-		"Given the candidate's resume and one job posting, score the fit from 0.0 to 5.0 " +
-		"(>=4 strong, 3-4 plausible, <3 weak) and be honest. " +
+		"Given the candidate's resume and one job posting (title, location, compensation, and " +
+		"description when available), score the fit from 0.0 to 5.0 " +
+		"(>=4 strong, 3-4 plausible, <3 weak). Weigh the actual responsibilities and requirements " +
+		"in the description, not just the title. Be honest. " +
 		"Return ONLY compact JSON, no prose, no code fences: " +
 		`{"score":<float>,"verdict":"<one sentence>","strengths":["..."],"concerns":["..."],"hard_stops":["..."]}`
-	usr := fmt.Sprintf("CANDIDATE RESUME:\n%s\n\nJOB POSTING:\nCompany: %s\nRole: %s\n\nScore the fit.",
-		cv, a.Company, a.Role)
+	usr := fmt.Sprintf("CANDIDATE RESUME:\n%s\n\nJOB POSTING:\n%s\nScore the fit.", cv, jobContext(a, postingDoc))
 	resp, err := s.LLM.Complete(ctx, []llm.Msg{{Role: "system", Content: sys}, {Role: "user", Content: usr}})
 	if err != nil {
 		return 0, nil, err
@@ -432,6 +435,88 @@ func (s *Server) evalOne(ctx context.Context, cv string, a store.Application) (f
 		ev.Score = 5
 	}
 	return ev.Score, json.RawMessage(j), nil
+}
+
+// jobContext builds the posting block for the evaluator: title + company always,
+// plus location, compensation, and a cleaned description when the scraped posting
+// carries them.
+func jobContext(a store.Application, doc json.RawMessage) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Company: %s\nRole: %s\n", a.Company, a.Role)
+	if len(doc) > 0 {
+		var p struct {
+			Location string          `json:"location"`
+			Comp     string          `json:"comp"`
+			PostedAt string          `json:"postedAt"`
+			Raw      json.RawMessage `json:"raw"`
+		}
+		if json.Unmarshal(doc, &p) == nil {
+			if p.Location != "" {
+				fmt.Fprintf(&b, "Location: %s\n", p.Location)
+			}
+			if p.Comp != "" {
+				fmt.Fprintf(&b, "Compensation: %s\n", p.Comp)
+			}
+			if p.PostedAt != "" {
+				fmt.Fprintf(&b, "Posted: %s\n", p.PostedAt)
+			}
+			if desc := extractDescription(p.Raw); desc != "" {
+				if len(desc) > 4000 {
+					desc = desc[:4000]
+				}
+				fmt.Fprintf(&b, "\nDescription:\n%s\n", desc)
+			}
+		}
+	}
+	return b.String()
+}
+
+// extractDescription best-effort pulls a job description out of an ATS raw record:
+// the longest string field whose key looks like a description/content/body,
+// HTML-stripped. Returns "" when the raw record has no such field.
+func extractDescription(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	best := ""
+	for k, v := range m {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		lk := strings.ToLower(k)
+		if strings.Contains(lk, "descript") || strings.Contains(lk, "content") || lk == "body" || lk == "text" || lk == "summary" {
+			if len(s) > len(best) {
+				best = s
+			}
+		}
+	}
+	return stripHTML(best)
+}
+
+// stripHTML removes tags, unescapes entities, and collapses whitespace.
+func stripHTML(s string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+			b.WriteByte(' ')
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(html.UnescapeString(b.String())), " ")
 }
 
 // extractJSON pulls the first {...} object out of a model reply (tolerating
