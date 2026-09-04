@@ -51,6 +51,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
 	mux.HandleFunc("POST /api/ask", s.ask)
+	mux.HandleFunc("GET /icon.png", s.icon)
+	mux.HandleFunc("GET /favicon.ico", s.icon)
 	mux.HandleFunc("GET /", s.index)
 	return mux
 }
@@ -72,6 +74,17 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(b)
+}
+
+func (s *Server) icon(w http.ResponseWriter, _ *http.Request) {
+	b, err := webFS.ReadFile("web/icon.png")
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(b)
 }
 

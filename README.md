@@ -56,6 +56,12 @@ none of its source; it reimagines the concept as a Go + Postgres platform with a
 plugin scraper architecture. If you want a batteries-included Node tool today,
 use career-ops.
 
+## Credits
+
+The Headhunter mark (favicon + sidebar logo) is the "headhunter" icon by **Evon**
+from the [Noun Project](https://thenounproject.com/icon/headhunter-2184662/),
+used under the Noun Project royalty-free license with attribution.
+
 ## License
 
 MIT © 2026 RevREB. See [LICENSE](LICENSE).

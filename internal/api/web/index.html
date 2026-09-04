@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Headhunter</title>
+<link rel="icon" type="image/png" href="/icon.png">
 <style>
   :root {
     --bg: #0d0e11; --panel: #16181d; --panel2: #1b1e24; --ink: #e9eaed; --muted: #8b929e;
@@ -17,7 +18,7 @@
 
   aside { width: 220px; flex: none; background: #0a0b0e; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 1rem .75rem; position: sticky; top: 0; height: 100vh; }
   .brand { display: flex; align-items: center; gap: .5rem; font-weight: 650; letter-spacing: -.01em; padding: .3rem .5rem 1.1rem; }
-  .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #b5623a); }
+  .brand .mark { width: 26px; height: 26px; background: var(--accent); -webkit-mask: url("/icon.png") center/contain no-repeat; mask: url("/icon.png") center/contain no-repeat; }
   nav a { display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border-radius: 8px; color: var(--muted); font-weight: 500; margin-bottom: 2px; }
   nav a .ic { width: 18px; text-align: center; opacity: .85; }
   nav a .tag { margin-left: auto; font-size: .6rem; letter-spacing: .06em; background: var(--accent-dim); color: var(--accent); padding: .05rem .3rem; border-radius: 4px; }
