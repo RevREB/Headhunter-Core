@@ -50,6 +50,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Msg, onDelta func(string)) e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.Key)
+	req.Header.Set("x-bf-vk", c.Key) // Bifrost extracts the virtual key from this header
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
