@@ -112,6 +112,20 @@
   .toggle.on { background: var(--accent); }
   .toggle i { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .12s; }
   .toggle.on i { left: 20px; }
+  /* assistant */
+  .ask-fab { position: fixed; right: 1.2rem; bottom: 1.2rem; z-index: 50; background: var(--accent); color: #1a120c; border: none; border-radius: 999px; padding: .55rem 1rem; font-weight: 650; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  .ask-panel { position: fixed; right: 1.2rem; bottom: 4.2rem; z-index: 50; width: 380px; max-width: calc(100vw - 2rem); height: 62vh; max-height: 560px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; display: none; flex-direction: column; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  .ask-panel.open { display: flex; }
+  .ask-head { padding: .7rem .9rem; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: .5rem; font-weight: 600; }
+  .ask-head .x { margin-left: auto; cursor: pointer; color: var(--muted); }
+  .ask-msgs { flex: 1; overflow-y: auto; padding: .8rem; display: flex; flex-direction: column; gap: .6rem; }
+  .msg { padding: .5rem .7rem; border-radius: 10px; font-size: .88rem; max-width: 86%; white-space: pre-wrap; line-height: 1.45; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #1a120c; }
+  .msg.bot { align-self: flex-start; background: var(--panel2); border: 1px solid var(--line); }
+  .msg.bot.err { color: var(--bad); }
+  .ask-in { display: flex; gap: .4rem; padding: .6rem; border-top: 1px solid var(--line); }
+  .ask-in input { flex: 1; }
+  .ask-hint { align-self: center; color: var(--muted); font-size: .78rem; text-align: center; }
 </style>
 
 <aside>
@@ -231,6 +245,13 @@
     </div>
   </section>
 </main>
+
+<button class="ask-fab" id="ask-fab">◆ Ask</button>
+<div class="ask-panel" id="ask-panel">
+  <div class="ask-head">◆ Assistant <span class="x" id="ask-close">✕</span></div>
+  <div class="ask-msgs" id="ask-msgs"><div class="ask-hint">Ask about your pipeline — "what should I apply to next?", "show me offers", "how's my funnel?"</div></div>
+  <div class="ask-in"><input id="ask-input" placeholder="Ask…"><button class="btn go" id="ask-send">Send</button></div>
+</div>
 
 <script>
   const FUNNEL = ["evaluated","applied","responded","interview","offer","hired"];
@@ -380,6 +401,51 @@
   document.getElementById("cv-save").onclick = e => saveConfig("cv", document.getElementById("cv-src").value, null).then(()=>{ e.target.textContent="Saved ✓"; setTimeout(()=>e.target.textContent="Save",1500); });
   document.getElementById("q").addEventListener("input", renderPipe);
   document.getElementById("statusFilter").addEventListener("change", renderPipe);
+
+  // ---- assistant ----
+  const askMsgs = document.getElementById("ask-msgs");
+  const askInput = document.getElementById("ask-input");
+  const askPanel = document.getElementById("ask-panel");
+  let askHistory = [], askBusy = false;
+  function askToggle(open){ askPanel.classList.toggle("open", open); if(open) askInput.focus(); }
+  document.getElementById("ask-fab").onclick = ()=>askToggle(!askPanel.classList.contains("open"));
+  document.getElementById("ask-close").onclick = ()=>askToggle(false);
+  function addMsg(role, text){ const d=document.createElement("div"); d.className="msg "+(role==="user"?"user":"bot"); d.textContent=text; askMsgs.appendChild(d); askMsgs.scrollTop=askMsgs.scrollHeight; return d; }
+  function runActions(text){
+    return text.replace(/<<act:(\w+)\s*(\{[^}]*\})?>>/g, (m,name,json)=>{
+      let arg={}; try{ arg=json?JSON.parse(json):{}; }catch(_){}
+      if(name==="navigate" && arg.view) location.hash="#"+arg.view;
+      else if(name==="filter" && arg.status){ location.hash="#pipeline"; const sel=document.getElementById("statusFilter"); if(sel){ sel.value=arg.status; renderPipe(); } }
+      return "";
+    }).trim();
+  }
+  async function askSend(){
+    const q = askInput.value.trim(); if(!q || askBusy) return;
+    askBusy = true; askInput.value="";
+    const hint = askMsgs.querySelector(".ask-hint"); if(hint) hint.remove();
+    addMsg("user", q); askHistory.push({role:"user", content:q});
+    const bot = addMsg("bot", "…"); let acc="";
+    try {
+      const r = await fetch("/api/ask", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({messages: askHistory})});
+      if(!r.ok){ const d=await r.json().catch(()=>({})); bot.textContent=d.error||"assistant unavailable"; bot.classList.add("err"); askBusy=false; return; }
+      const reader = r.body.getReader(), dec = new TextDecoder(); let buf="";
+      for(;;){
+        const {value, done} = await reader.read(); if(done) break;
+        buf += dec.decode(value, {stream:true}); let idx;
+        while((idx = buf.indexOf("\n\n")) >= 0){
+          const line = buf.slice(0, idx).trim(); buf = buf.slice(idx+2);
+          if(!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim(); if(data==="[DONE]") continue;
+          try { const o = JSON.parse(data); if(o.content){ acc += o.content; bot.textContent = runActions(acc) || "…"; askMsgs.scrollTop=askMsgs.scrollHeight; } else if(o.error){ bot.textContent=o.error; bot.classList.add("err"); } } catch(_){}
+        }
+      }
+      bot.textContent = runActions(acc) || "(done)";
+      askHistory.push({role:"assistant", content: acc});
+    } catch(e){ bot.textContent = String(e); bot.classList.add("err"); }
+    askBusy = false;
+  }
+  document.getElementById("ask-send").onclick = askSend;
+  askInput.addEventListener("keydown", e=>{ if(e.key==="Enter") askSend(); });
 
   function route() {
     const v = (location.hash.replace("#","") || "today");

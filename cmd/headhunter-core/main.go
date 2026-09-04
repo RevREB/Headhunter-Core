@@ -12,6 +12,7 @@ import (
 
 	"github.com/RevREB/Headhunter-Core/internal/analytics"
 	"github.com/RevREB/Headhunter-Core/internal/api"
+	"github.com/RevREB/Headhunter-Core/internal/llm"
 	"github.com/RevREB/Headhunter-Core/internal/store"
 )
 
@@ -60,7 +61,7 @@ func main() {
 		log.Printf("DATABASE_URL unset — serving health only (degraded mode)")
 	}
 
-	srv := api.New(st, an)
+	srv := api.New(st, an, llm.FromEnv())
 	log.Printf("headhunter-core listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
 }

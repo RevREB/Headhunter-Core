@@ -2,16 +2,21 @@
 package api
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/RevREB/Headhunter-Core/internal/analytics"
 	"github.com/RevREB/Headhunter-Core/internal/engine"
 	"github.com/RevREB/Headhunter-Core/internal/importer"
+	"github.com/RevREB/Headhunter-Core/internal/llm"
 	"github.com/RevREB/Headhunter-Core/internal/store"
 	"github.com/RevREB/Headhunter-Core/pkg/scraper"
 )
@@ -24,11 +29,12 @@ var webFS embed.FS
 type Server struct {
 	Store     *store.Store
 	Analytics *analytics.Analytics
+	LLM       *llm.Client
 }
 
 // New builds the API server.
-func New(st *store.Store, an *analytics.Analytics) *Server {
-	return &Server{Store: st, Analytics: an}
+func New(st *store.Store, an *analytics.Analytics, l *llm.Client) *Server {
+	return &Server{Store: st, Analytics: an, LLM: l}
 }
 
 // Routes returns the HTTP handler.
@@ -44,6 +50,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/config", s.getConfig)
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
+	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("GET /", s.index)
 	return mux
 }
@@ -211,6 +218,86 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": r.PathValue("key")})
+}
+
+func (s *Server) ask(w http.ResponseWriter, r *http.Request) {
+	if s.LLM == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "assistant not configured"})
+		return
+	}
+	var req struct {
+		Messages []llm.Msg `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Messages) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected {messages:[...]}"})
+		return
+	}
+	msgs := append([]llm.Msg{{Role: "system", Content: s.systemPrompt(r.Context())}}, req.Messages...)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	flusher, _ := w.(http.Flusher)
+	send := func(obj any) {
+		b, _ := json.Marshal(obj)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	if err := s.LLM.Stream(r.Context(), msgs, func(delta string) { send(map[string]string{"content": delta}) }); err != nil {
+		send(map[string]string{"error": err.Error()})
+	}
+	fmt.Fprint(w, "data: [DONE]\n\n")
+	if flusher != nil {
+		flusher.Flush()
+	}
+}
+
+func (s *Server) systemPrompt(ctx context.Context) string {
+	var b strings.Builder
+	b.WriteString("You are the Headhunter assistant, embedded in a self-hosted job-search dashboard for one user. Be concise, practical, and specific.\n")
+	if s.Analytics != nil {
+		if f, err := s.Analytics.Funnel(ctx); err == nil {
+			b.WriteString("Funnel: ")
+			for _, k := range []string{"evaluated", "applied", "responded", "interview", "offer", "hired", "rejected", "discarded", "skip"} {
+				if f[k] > 0 {
+					fmt.Fprintf(&b, "%s=%d ", k, f[k])
+				}
+			}
+			b.WriteString("\n")
+		}
+	}
+	if s.Store != nil {
+		if apps, err := s.Store.ListApplications(ctx, 300, "evaluated"); err == nil {
+			sort.Slice(apps, func(i, j int) bool {
+				si, sj := 0.0, 0.0
+				if apps[i].Score != nil {
+					si = *apps[i].Score
+				}
+				if apps[j].Score != nil {
+					sj = *apps[j].Score
+				}
+				return si > sj
+			})
+			b.WriteString("Top postings awaiting the user's decision (highest score first):\n")
+			for i, a := range apps {
+				if i >= 12 {
+					break
+				}
+				sc := "\u2014"
+				if a.Score != nil {
+					sc = fmt.Sprintf("%.1f", *a.Score)
+				}
+				fmt.Fprintf(&b, "- %s \u2014 %s (%s)\n", a.Company, a.Role, sc)
+			}
+		}
+	}
+	b.WriteString("\nYou can drive the UI by emitting an action tag alone on its own line:\n")
+	b.WriteString("  <<act:navigate {\"view\":\"VIEW\"}>>  VIEW in: today, explore, pipeline, followups, portals, analytics, cv, config\n")
+	b.WriteString("  <<act:filter {\"status\":\"STATUS\"}>>  filter the Pipeline (also navigates there)\n")
+	b.WriteString("Emit an action ONLY when the user clearly wants to navigate or filter; otherwise just answer.")
+	return b.String()
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
