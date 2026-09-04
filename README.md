@@ -40,7 +40,7 @@ columns for the variable-shape documents (postings, evaluation reports, config).
 | `internal/analytics` | SQL funnel/velocity/latency/survival metrics |
 | `internal/api` | MCP-shaped HTTP surface |
 | `internal/operator` | on-demand scraper Job launcher |
-| `migrations` | Postgres schema |
+| `internal/store/migrations` | Postgres schema (embedded, applied on boot) |
 
 ## Status
 
