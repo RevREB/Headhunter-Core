@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -386,6 +387,7 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 		doc, _ := s.Store.GetPostingDoc(r.Context(), a.ID)
 		score, report, err := s.evalOne(r.Context(), cv, a, doc)
 		if err != nil {
+			log.Printf("evaluate: app %d %s / %s: %v", a.ID, a.Company, a.Role, err)
 			failed++
 			continue
 		}
@@ -394,6 +396,7 @@ func (s *Server) evaluate(w http.ResponseWriter, r *http.Request) {
 			to = "discarded"
 		}
 		if err := s.Store.SaveEvaluation(r.Context(), a.ID, score, to, report); err != nil {
+			log.Printf("evaluate: save app %d: %v", a.ID, err)
 			failed++
 			continue
 		}
