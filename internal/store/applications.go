@@ -93,8 +93,11 @@ func (s *Store) GetApplication(ctx context.Context, id int64) (*ApplicationDetai
 // ListApplications returns applications newest-first, optionally filtered by
 // status. limit is clamped to [1,5000].
 func (s *Store) ListApplications(ctx context.Context, limit int, status string) ([]Application, error) {
-	if limit <= 0 || limit > 5000 {
+	if limit <= 0 {
 		limit = 100
+	}
+	if limit > 20000 {
+		limit = 20000 // cap, but large enough to sweep the whole backlog
 	}
 	// canonical_id IS NULL hides near-duplicate rows (multi-location listings /
 	// reposts collapsed into their canonical role).
