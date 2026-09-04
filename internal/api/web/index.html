@@ -396,6 +396,9 @@
   }
   const PIPE_TABS = ["inbox", "all", ...FUNNEL, ...SIDE];
   let pipeTab = "inbox", pipeSort = { col: "createdAt", dir: -1 };
+  // Entering a tab applies its default sort. Evaluated leads with the highest-fit
+  // roles (score desc); every other tab defaults to newest-first.
+  function gotoPipeTab(tab){ pipeTab = tab; pipeSort = tab === "evaluated" ? { col: "score", dir: -1 } : { col: "createdAt", dir: -1 }; renderPipe(); }
   const avatarSm = co => `<span class="avatar" style="background:hsl(${hue(co)} 45% 38%)">${esc(initials(co))}</span>`;
   function scoreBadge(s){ if(s==null) return '<span class="sc-badge sc-lo">—</span>'; const c = s>=4?"sc-hi":(s>=3?"sc-mid":"sc-lo"); return `<span class="sc-badge ${c}">${s.toFixed(1)}</span>`; }
   const dotColor = st => ({inbox:"var(--accent)",applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)"}[st]||"var(--muted)");
@@ -407,7 +410,7 @@
     PIPE_TABS.forEach(t => counts[t] = (t==="all") ? ALL.length : ALL.filter(a=>a.status===t).length);
     document.getElementById("pipe-tabs").innerHTML = PIPE_TABS.map(t =>
       `<a class="${t===pipeTab?'on':''}" data-tab="${t}">${t.toUpperCase()}<b>${counts[t]||0}</b></a>`).join("");
-    document.querySelectorAll("#pipe-tabs a").forEach(a => a.onclick = () => { pipeTab = a.dataset.tab; renderPipe(); });
+    document.querySelectorAll("#pipe-tabs a").forEach(a => a.onclick = () => gotoPipeTab(a.dataset.tab));
 
     // filter + sort
     const q = (document.getElementById("q").value||"").toLowerCase();
@@ -580,7 +583,7 @@
     return text.replace(/<<act:(\w+)\s*(\{[^}]*\})?>>/g, (m,name,json)=>{
       let arg={}; try{ arg=json?JSON.parse(json):{}; }catch(_){}
       if(name==="navigate" && arg.view) location.hash="#"+arg.view;
-      else if(name==="filter" && arg.status){ location.hash="#pipeline"; pipeTab=arg.status; renderPipe(); }
+      else if(name==="filter" && arg.status){ location.hash="#pipeline"; gotoPipeTab(arg.status); }
       return "";
     }).trim();
   }
