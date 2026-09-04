@@ -4,10 +4,14 @@ package api
 import (
 	"embed"
 	"encoding/json"
+	"io"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/RevREB/Headhunter-Core/internal/analytics"
 	"github.com/RevREB/Headhunter-Core/internal/engine"
+	"github.com/RevREB/Headhunter-Core/internal/importer"
 	"github.com/RevREB/Headhunter-Core/internal/store"
 	"github.com/RevREB/Headhunter-Core/pkg/scraper"
 )
@@ -34,7 +38,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tools", s.tools)
 	mux.HandleFunc("POST /api/tools/{name}", s.callTool)
 	mux.HandleFunc("GET /api/applications", s.listApplications)
+	mux.HandleFunc("POST /api/applications/{id}/status", s.setStatus)
 	mux.HandleFunc("POST /api/scan/ingest", s.ingest)
+	mux.HandleFunc("POST /api/import/tracker", s.importTracker)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
 	mux.HandleFunc("GET /", s.index)
 	return mux
@@ -46,7 +52,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// index serves the embedded dashboard at "/" (and 404s any other unmatched path).
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -61,9 +66,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
-	_, _ = w.Write([]byte("ok\n"))
-}
+func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) }
 
 func (s *Server) tools(w http.ResponseWriter, _ *http.Request) {
 	type tool struct {
@@ -103,12 +106,72 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
 		return
 	}
-	apps, err := s.Store.ListApplications(r.Context(), 100)
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	apps, err := s.Store.ListApplications(r.Context(), limit, r.URL.Query().Get("status"))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applications": apps})
+}
+
+func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	var body struct {
+		To string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected {\"to\":\"...\"}"})
+		return
+	}
+	if err := s.Store.SetStatus(r.Context(), id, body.To); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "status": body.To})
+}
+
+// importTracker ingests an applications.md document (full reload). Guarded by
+// IMPORT_TOKEN: disabled unless the env is set and the request header matches.
+func (s *Server) importTracker(w http.ResponseWriter, r *http.Request) {
+	token := os.Getenv("IMPORT_TOKEN")
+	if token == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "import disabled (IMPORT_TOKEN unset)"})
+		return
+	}
+	if r.Header.Get("X-Import-Token") != token {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
+		return
+	}
+	rows := importer.ParseTracker(string(body))
+	n, err := s.Store.LoadTracker(r.Context(), rows)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error(), "loaded": strconv.Itoa(n)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "parsed": len(rows), "imported": n})
 }
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
@@ -126,12 +189,8 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		normURL := engine.NormalizeURL(p.URL)
 		fp := engine.SimHash(p.Title + " " + p.Company + " " + string(p.Raw))
 		trust, _ := engine.TrustScore(engine.PostingSignals{
-			HasApplyURL:      p.URL != "",
-			HasSalary:        p.Comp != "",
-			HasCompany:       p.Company != "",
-			HasLocation:      p.Location != "",
-			DescriptionLen:   len(p.Raw),
-			PostedWithinDays: -1,
+			HasApplyURL: p.URL != "", HasSalary: p.Comp != "", HasCompany: p.Company != "",
+			HasLocation: p.Location != "", DescriptionLen: len(p.Raw), PostedWithinDays: -1,
 		})
 		raw, _ := json.Marshal(p)
 		res, err := s.Store.IngestPosting(r.Context(), normURL, "", p.Company, p.Title, fp, trust, raw)
@@ -145,9 +204,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			deduped++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "created": created, "deduped": deduped, "failed": failed,
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "deduped": deduped, "failed": failed})
 }
 
 func (s *Server) cycle(w http.ResponseWriter, _ *http.Request) {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -16,14 +17,21 @@ type Application struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// ListApplications returns the most recent applications, newest first.
-func (s *Store) ListApplications(ctx context.Context, limit int) ([]Application, error) {
-	if limit <= 0 || limit > 500 {
+// ListApplications returns applications newest-first, optionally filtered by
+// status. limit is clamped to [1,5000].
+func (s *Store) ListApplications(ctx context.Context, limit int, status string) ([]Application, error) {
+	if limit <= 0 || limit > 5000 {
 		limit = 100
 	}
-	rows, err := s.Pool.Query(ctx,
-		`SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at
-		 FROM applications ORDER BY created_at DESC LIMIT $1`, limit)
+	q := `SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at FROM applications`
+	args := []any{}
+	if status != "" {
+		q += ` WHERE status = $1::application_status`
+		args = append(args, status)
+	}
+	q += fmt.Sprintf(` ORDER BY created_at DESC LIMIT %d`, limit)
+
+	rows, err := s.Pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
