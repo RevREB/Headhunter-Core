@@ -560,7 +560,9 @@
   function renderProfile() {
     if (!profileLoaded) {
       let prof = {};
-      if (CONFIG.profile !== undefined) { try { prof = JSON.parse(CONFIG.profile); } catch(_){} }
+      const cp = CONFIG.profile;
+      if (cp && typeof cp === "object") prof = cp;                        // stored as a JSON object
+      else if (typeof cp === "string") { try { prof = JSON.parse(cp); } catch(_){} }
       document.getElementById("profile-fields").innerHTML = PROFILE_FIELDS.map(f => {
         const v = esc(prof[f.k] || "");
         const ctl = f.multi
