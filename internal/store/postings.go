@@ -114,6 +114,16 @@ func (s *Store) IngestPosting(
 		}
 	}
 
+	// Resolve/attach the company as a first-class entity; a newly-created company
+	// is picked up by the profiler consumer.
+	if companyID, cerr := upsertCompanyTx(ctx, tx, company); cerr == nil && companyID != 0 {
+		if _, err := tx.Exec(ctx,
+			`UPDATE applications SET company_id=$2 WHERE id=$1 AND company_id IS DISTINCT FROM $2`,
+			appID, companyID); err != nil {
+			return IngestResult{}, err
+		}
+	}
+
 	// Always record the sighting (dedup/repost analytics live off this table).
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO scan_sightings (application_id, url, ats, fingerprint, trust_score)

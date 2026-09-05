@@ -71,6 +71,19 @@ func main() {
 	}
 	srv := api.New(st, an, llm.FromEnv(), cyc)
 	go srv.RunEvaluator(context.Background()) // persistent inbox consumer (auto A–G)
+	if st != nil {
+		// Backfill company entities from existing applications, then let the
+		// profiler consumer drain unprofiled companies. Backfill runs in the
+		// background so it never delays serving.
+		go func() {
+			if n, err := st.BackfillCompanies(context.Background()); err != nil {
+				log.Printf("company backfill: %v", err)
+			} else if n > 0 {
+				log.Printf("company backfill: linked %d application(s)", n)
+			}
+		}()
+		go srv.RunProfiler(context.Background()) // persistent company-profile consumer
+	}
 	log.Printf("headhunter-core listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
 }

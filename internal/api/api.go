@@ -50,6 +50,10 @@ type Server struct {
 	evalDone     int64
 	evalFailed   int64
 	evalStarted  time.Time
+	// company-profiler consumer counters (atomic)
+	profInFlight int64
+	profDone     int64
+	profFailed   int64
 }
 
 // New builds the API server.
@@ -123,6 +127,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/evaluate/status", s.evalStatus)
 	mux.HandleFunc("POST /api/evaluate/pause", s.evalPause)
 	mux.HandleFunc("POST /api/evaluate/reeval", s.evalReeval)
+	mux.HandleFunc("GET /api/companies", s.companiesList)
+	mux.HandleFunc("GET /api/companies/profile/status", s.profileStatus)
+	mux.HandleFunc("POST /api/companies/profile/pause", s.profilePause)
+	mux.HandleFunc("POST /api/companies/reprofile", s.companiesReprofile)
+	mux.HandleFunc("GET /api/company/{id}", s.companyGet)
 	mux.HandleFunc("POST /api/ask", s.ask)
 	mux.HandleFunc("GET /icon.png", s.icon)
 	mux.HandleFunc("GET /favicon.ico", s.icon)

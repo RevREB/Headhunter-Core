@@ -187,6 +187,7 @@
     <a href="#today" data-view="today"><span class="ic">◎</span><span>Today</span></a>
     <a href="#explore" data-view="explore"><span class="ic">◐</span><span>Explore</span><span class="tag">NEW</span></a>
     <a href="#pipeline" data-view="pipeline"><span class="ic">≡</span><span>Pipeline</span></a>
+    <a href="#companies" data-view="companies"><span class="ic">▣</span><span>Companies</span><span class="tag">NEW</span></a>
     <a href="#followups" data-view="followups"><span class="ic">↻</span><span>Follow-ups</span></a>
     <a href="#portals" data-view="portals"><span class="ic">◎</span><span>Portals</span></a>
     <a href="#analytics" data-view="analytics"><span class="ic">▤</span><span>Analytics</span></a>
@@ -321,6 +322,29 @@
   </section>
 
   <!-- CONFIG -->
+  <section class="view" id="view-companies">
+    <div class="hero">
+      <div class="kicker">Companies</div>
+      <h1>The company <b>graph</b></h1>
+      <p>A profile is assembled once per company from free structured sources (Built In, Wikidata, SEC EDGAR) and reused across all its postings. Sourcing is deterministic — no LLM tokens.</p>
+    </div>
+    <div class="card pad" id="cprofile-panel" style="margin-bottom:.8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <b>Profiler</b>
+      <span class="hint" id="cprofile-line" style="color:var(--muted)">…</span>
+      <button class="btn ghost" id="cprofile-pause" style="margin-left:auto">Pause</button>
+      <button class="btn ghost" id="cprofile-reprofile" title="Re-queue every company to be re-profiled from its sources (no tokens)">Re-profile all</button>
+    </div>
+    <div class="toolbar"><input class="grow" id="cq" placeholder="Search company…"></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Company</th><th>Size</th><th>Stage</th><th>ATS</th><th class="num">Postings</th><th class="num">Avg score</th><th>Flags</th></tr></thead>
+      <tbody id="companies-body"><tr><td colspan="7" class="empty">loading…</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section class="view" id="view-company">
+    <div id="company-body"><div class="empty">loading…</div></div>
+  </section>
+
   <section class="view" id="view-config">
     <div class="hero"><div class="kicker">Config</div><h1>Your <b>settings</b></h1><p>Follow-up cadence, appearance, and the AI engine. Local-first — your data stays on your cluster.</p></div>
     <h2 class="sec">AI engine</h2>
@@ -732,6 +756,88 @@
     renderPipe();
   }));
 
+  // ---- companies ----
+  let COMPANIES = [], cprofileTimer = null;
+  function fmtNum(s){ const n = parseInt(String(s).replace(/[^0-9]/g,""),10); return isNaN(n) ? esc(String(s)) : n.toLocaleString(); }
+  async function renderCompanies(){
+    const body = document.getElementById("companies-body");
+    try { COMPANIES = (await fetch("/api/companies").then(r=>r.json())).companies || []; }
+    catch(e){ body.innerHTML = `<tr><td colspan="7" class="empty">error loading</td></tr>`; return; }
+    drawCompanies();
+  }
+  function drawCompanies(){
+    const body = document.getElementById("companies-body");
+    const q = (document.getElementById("cq").value||"").toLowerCase();
+    const rows = COMPANIES.filter(c => !q || c.name.toLowerCase().includes(q));
+    body.innerHTML = rows.length ? rows.map(c=>`
+      <tr onclick="location.hash='#company/${c.id}'" title="Open company profile" style="cursor:pointer">
+        <td>${esc(c.name)}${c.domain?` <span class="hint" style="color:var(--muted)">${esc(c.domain)}</span>`:""}</td>
+        <td>${c.size?fmtNum(c.size):"—"}</td>
+        <td style="text-transform:capitalize">${esc(c.stage||"—")}</td>
+        <td>${esc(c.ats||"—")}</td>
+        <td class="num">${c.postings||0}</td>
+        <td class="num">${c.avgScore!=null?c.avgScore.toFixed(1):"—"}</td>
+        <td>${(c.flags||[]).map(f=>`<span class="pill rejected">${esc(f)}</span>`).join(" ")}</td>
+      </tr>`).join("") : `<tr><td colspan="7" class="empty">No companies yet.</td></tr>`;
+  }
+  async function pollCompanyProfile(){
+    clearTimeout(cprofileTimer); cprofileTimer = null;
+    const line = document.getElementById("cprofile-line"); if(!line) return;
+    const pauseB = document.getElementById("cprofile-pause");
+    let s; try { s = await fetch("/api/companies/profile/status").then(r=>r.json()); } catch(e){ return; }
+    const busy = (s.waiting + s.inFlight) > 0;
+    line.textContent = `${s.enabled?(busy?"● running":"idle"):"paused"} · ${s.workers} workers · ${s.waiting} waiting, ${s.inFlight} in-flight · session ✓${s.doneSession} ✗${s.failedSession}`;
+    line.style.color = s.enabled && busy ? "var(--good)" : "var(--muted)";
+    pauseB.textContent = s.enabled ? "Pause" : "Resume";
+    if (document.getElementById("view-companies")?.classList.contains("active"))
+      cprofileTimer = setTimeout(()=>{ pollCompanyProfile(); if(busy) renderCompanies(); }, 5000);
+  }
+  async function loadCompany(id){
+    const body = document.getElementById("company-body");
+    body.innerHTML = `<div class="empty">loading…</div>`;
+    try {
+      const r = await fetch(`/api/company/${encodeURIComponent(id)}`);
+      if(!r.ok){ body.innerHTML = `<div class="topbar" style="justify-content:flex-start"><a class="btn ghost" href="#companies">← Companies</a></div><div class="empty">${r.status===404?"No such company.":"failed ("+r.status+")"}</div>`; return; }
+      renderCompany((await r.json()).company);
+    } catch(e){ body.innerHTML = `<div class="empty">error: ${esc(e)}</div>`; }
+  }
+  function srcBadge(s){ return `<span class="chip ${s==="inferred"?"ex":"src"}" style="font-size:.66rem;padding:.05rem .4rem">${esc(s)}</span>`; }
+  function renderCompany(c){
+    const body = document.getElementById("company-body");
+    const f = (c.profile && c.profile.fields) || {};
+    const order = ["stage","ticker","employees","founded","hq","industry","ats","website"];
+    const label = {stage:"Stage",ticker:"Ticker",employees:"Employees",founded:"Founded",hq:"HQ",industry:"Industry",ats:"ATS",website:"Website"};
+    const rowsHtml = order.filter(k=>f[k]).map(k=>{
+      let v = f[k].value;
+      if (Array.isArray(v)) v = v.join(", ");
+      if (k==="employees") v = fmtNum(String(v));
+      v = (k==="website") ? `<a href="${esc(f[k].value)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(f[k].value)}</a>` : esc(String(v));
+      const detail = f[k].detail ? ` <span class="hint" style="color:var(--muted)">${esc(f[k].detail)}</span>` : "";
+      return `<tr><td style="color:var(--muted);width:9rem">${label[k]}</td><td>${v} ${srcBadge(f[k].source)}${detail}</td></tr>`;
+    }).join("");
+    const flags = (c.flags||[]).map(x=>`<span class="pill rejected">${esc(x)}</span>`).join(" ");
+    const posts = (c.postings||[]).map(p=>`<tr onclick="location.hash='#job/${p.id}'" style="cursor:pointer"><td>${esc(p.role)}</td><td><span class="pill ${esc(p.status)}">${esc(p.status)}</span></td><td class="sc">${p.score!=null?p.score.toFixed(1):"—"}</td></tr>`).join("");
+    body.innerHTML = `
+      <div class="topbar" style="justify-content:flex-start"><a class="btn ghost" href="#companies">← Companies</a></div>
+      <div class="hero"><div class="kicker">Company ${c.profiled?"· profiled":"· not profiled yet"}</div><h1>${esc(c.name)} ${flags}</h1></div>
+      <h2 class="sec">OSINT profile <span class="hint">provenance-tagged — sourced facts are reliable, inferred are context</span></h2>
+      <div class="card"><table>${rowsHtml || '<tr><td class="empty">No profile yet — the profiler will fill this in.</td></tr>'}</table></div>
+      ${c.profile && c.profile.summary ? `<h2 class="sec">Summary <span class="hint">inferred</span></h2><div class="card pad">${esc(c.profile.summary)}</div>` : ""}
+      <h2 class="sec">Postings <span class="hint">${(c.postings||[]).length}</span></h2>
+      <div class="scroll"><table><thead><tr><th>Role</th><th>Status</th><th class="sc">Score</th></tr></thead><tbody>${posts || '<tr><td colspan="3" class="empty">none</td></tr>'}</tbody></table></div>`;
+  }
+  document.getElementById("cq").addEventListener("input", drawCompanies);
+  document.getElementById("cprofile-pause").onclick = async e => {
+    const resume = e.target.textContent === "Resume";
+    try { await fetch("/api/companies/profile/pause?on=" + (resume ? "true" : "false"), {method:"POST"}); } catch(_){}
+    setTimeout(pollCompanyProfile, 300);
+  };
+  document.getElementById("cprofile-reprofile").onclick = async e => {
+    e.target.disabled = true;
+    try { const r = await fetch("/api/companies/reprofile", {method:"POST"}); const d = await r.json(); document.getElementById("cprofile-line").textContent = `re-queued ${d.requeued||0} companies`; } catch(_){}
+    setTimeout(()=>{ e.target.disabled = false; pollCompanyProfile(); }, 600);
+  };
+
   // ---- assistant ----
   const askMsgs = document.getElementById("ask-msgs");
   const askInput = document.getElementById("ask-input");
@@ -787,10 +893,18 @@
       window.scrollTo(0,0);
       return;
     }
+    if (v === "company" && arg) {
+      document.getElementById("view-company").classList.add("active");
+      document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.view==="companies"));
+      loadCompany(arg);
+      window.scrollTo(0,0);
+      return;
+    }
     document.getElementById("view-"+v)?.classList.add("active");
     document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.view===v));
     if (v === "explore") renderScanStatus();
     if (v === "pipeline") pollEval();
+    if (v === "companies") { renderCompanies(); pollCompanyProfile(); }
   }
   window.addEventListener("hashchange", route);
   route(); load();
