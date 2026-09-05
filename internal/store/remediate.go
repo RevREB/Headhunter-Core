@@ -6,14 +6,14 @@ import "context"
 // running extract() over the app's (longest) report markdown. Dry-run unless
 // apply=true. Returns how many URLs are recoverable and how many were written.
 func (s *Store) BackfillURLsFromReports(ctx context.Context, apply bool, extract func(md string) string) (candidates, updated int, err error) {
+	// One pass: the longest markdown report per url-empty canonical app (DISTINCT
+	// ON does the pick in a single sort, not a per-row correlated subquery).
 	rows, err := s.Pool.Query(ctx, `
-		SELECT a.id,
-		       (SELECT r.doc->>'markdown' FROM reports r
-		        WHERE r.application_id = a.id AND r.doc ? 'markdown'
-		        ORDER BY length(r.doc->>'markdown') DESC LIMIT 1)
-		FROM applications a
-		WHERE a.canonical_id IS NULL AND coalesce(a.url,'') = ''
-		  AND EXISTS (SELECT 1 FROM reports r WHERE r.application_id = a.id AND r.doc ? 'markdown')`)
+		SELECT DISTINCT ON (r.application_id) r.application_id, r.doc->>'markdown'
+		FROM reports r
+		JOIN applications a ON a.id = r.application_id
+		WHERE a.canonical_id IS NULL AND coalesce(a.url,'') = '' AND r.doc ? 'markdown'
+		ORDER BY r.application_id, length(r.doc->>'markdown') DESC`)
 	if err != nil {
 		return 0, 0, err
 	}
