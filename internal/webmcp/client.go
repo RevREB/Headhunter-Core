@@ -94,6 +94,11 @@ func (c *Client) rpc(ctx context.Context, method string, params any, notif bool)
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(data.String()) == "" {
+		// The server opens an SSE stream then closes it empty when a tool fails
+		// or a navigation never settles (e.g. an anti-bot page that hangs load).
+		return nil, fmt.Errorf("webmcp %s: empty response (page may block automation or timed out)", method)
+	}
 	var r rpcResp
 	if err := json.Unmarshal([]byte(data.String()), &r); err != nil {
 		return nil, fmt.Errorf("webmcp %s: decode: %w", method, err)

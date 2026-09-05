@@ -196,8 +196,11 @@ type applyResult struct {
 	Filled       []string `json:"filled"`
 	Remaining    []string `json:"remaining"` // unmatched text fields the human should complete
 	Fields       int      `json:"fields"`
+	Note         string   `json:"note,omitempty"` // set when auto-open/fill couldn't proceed
 	Handoff      string   `json:"handoff"`
 }
+
+const handoffMsg = "Take over to review and submit: kubectl -n headhunter port-forward svc/headhunter-webmcp 6080:6080 then open http://localhost:6080/vnc.html — Headhunter never submits."
 
 // prepareApplication drives WebMCP to open the URL and fill the safe identity
 // fields, then STOPS (never submits) so the human can finish and submit via noVNC.
@@ -213,14 +216,18 @@ func (s *Server) prepareApplication(ctx context.Context, applyURL string) (*appl
 		return nil, err
 	}
 	target := resolveApplyURL(applyURL) // known-ATS fast path (Lever/Ashby)
+	res := &applyResult{URL: target, Filled: []string{}, Remaining: []string{}, Handoff: handoffMsg}
+	// A page that blocks automation or never settles (some aggregators/ATSes)
+	// shouldn't fail the request — the browser is open, so hand off to noVNC.
 	if err := cl.Navigate(ctx, target); err != nil {
-		return nil, err
+		res.Note = "Couldn't auto-open this page (it may block automation). The browser is open at that URL — take over via noVNC to continue."
+		return res, nil
 	}
 	snap, err := cl.Snapshot(ctx)
 	if err != nil {
-		return nil, err
+		res.Note = "Opened the page but couldn't read the form automatically. Take over via noVNC to fill it in."
+		return res, nil
 	}
-	res := &applyResult{URL: target, Filled: []string{}, Remaining: []string{}}
 	// If the opened page has no fillable form, try to reach one by clicking an
 	// "Apply" control (covers Built In, embedded flows, and unknown ATSes).
 	if countTextFields(parseSnapshot(snap)) == 0 {
@@ -247,10 +254,12 @@ func (s *Server) prepareApplication(ctx context.Context, applyURL string) (*appl
 		}
 	}
 	if err := cl.FillForm(ctx, fills); err != nil {
-		return nil, err
+		res.Note = "Found the form but couldn't fill it automatically. Take over via noVNC."
+		return res, nil
 	}
-	res.Handoff = "Filled the safe identity fields. Take over to review and submit: " +
-		"kubectl -n headhunter port-forward svc/headhunter-webmcp 6080:6080 then open http://localhost:6080/vnc.html"
+	if res.Fields == 0 {
+		res.Note = "No form fields found on this page — it may need an Apply click or a login. Take over via noVNC."
+	}
 	return res, nil
 }
 

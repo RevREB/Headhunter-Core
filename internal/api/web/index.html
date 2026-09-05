@@ -467,6 +467,10 @@
       const d = await r.json().catch(()=>({}));
       if (!r.ok) { if(box) box.innerHTML = `<div class="card pad" style="border-color:var(--bad)"><b>Apply failed:</b> ${esc(d.error||r.status)}</div>`; if(btn) btn.disabled=false; return; }
       const a = d.apply || {};
+      if (a.note && !(a.filled||[]).length) {
+        if (box) box.innerHTML = `<div class="card pad"><b>Handoff</b><div style="margin:.4rem 0">${esc(a.note)}</div><div class="hint" style="color:var(--muted)">${a.url?`Opened <a href="${esc(a.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(a.url)}</a>. `:""}Take over: <code>kubectl -n headhunter port-forward svc/headhunter-webmcp 6080:6080</code> → <code>http://localhost:6080/vnc.html</code></div></div>`;
+        if (btn) btn.disabled = false; return;
+      }
       const filled = (a.filled||[]).map(x=>`<span class="chip src">${esc(x)}</span>`).join(" ") || `<span class="hint" style="color:var(--muted)">none matched</span>`;
       const rem = (a.remaining||[]).map(x=>`<span class="chip ex">${esc(x)}</span>`).join(" ") || `<span class="hint" style="color:var(--muted)">none</span>`;
       if (box) box.innerHTML = `<div class="card pad">
