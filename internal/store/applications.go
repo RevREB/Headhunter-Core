@@ -21,6 +21,7 @@ type Application struct {
 	Role      string    `json:"role"`
 	Score     *float64  `json:"score"`
 	Status    string    `json:"status"`
+	Imported  bool      `json:"imported"` // career-ops legacy import (no scraped posting)
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -49,9 +50,9 @@ func (s *Store) GetApplication(ctx context.Context, id int64) (*ApplicationDetai
 	var d ApplicationDetail
 	var score *float64
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at, updated_at
+		`SELECT id, coalesce(url,''), company, role, score::float8, status::text, imported, created_at, updated_at
 		 FROM applications WHERE id=$1`, id).
-		Scan(&d.ID, &d.URL, &d.Company, &d.Role, &score, &d.Status, &d.CreatedAt, &d.UpdatedAt)
+		Scan(&d.ID, &d.URL, &d.Company, &d.Role, &score, &d.Status, &d.Imported, &d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -101,7 +102,7 @@ func (s *Store) ListApplications(ctx context.Context, limit int, status string) 
 	}
 	// canonical_id IS NULL hides near-duplicate rows (multi-location listings /
 	// reposts collapsed into their canonical role).
-	q := `SELECT id, coalesce(url,''), company, role, score::float8, status::text, created_at FROM applications WHERE canonical_id IS NULL`
+	q := `SELECT id, coalesce(url,''), company, role, score::float8, status::text, imported, created_at FROM applications WHERE canonical_id IS NULL`
 	args := []any{}
 	if status != "" {
 		q += ` AND status = $1::application_status`
@@ -118,7 +119,7 @@ func (s *Store) ListApplications(ctx context.Context, limit int, status string) 
 	for rows.Next() {
 		var a Application
 		var score *float64
-		if err := rows.Scan(&a.ID, &a.URL, &a.Company, &a.Role, &score, &a.Status, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.URL, &a.Company, &a.Role, &score, &a.Status, &a.Imported, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		a.Score = score

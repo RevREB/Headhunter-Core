@@ -56,3 +56,24 @@ func TestMatchValueSafety(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractReportURL(t *testing.T) {
+	caci := "# Evaluation: CACI — AI Enterprise Architect\n\n**URL:** https://caci.wd1.myworkdayjobs.com/External/job/Washington-DC-US/AI-Enterprise-Architect_331405\n**Via:** — (direct)\n"
+	if got := extractReportURL(caci); got != "https://caci.wd1.myworkdayjobs.com/External/job/Washington-DC-US/AI-Enterprise-Architect_331405" {
+		t.Errorf("labeled URL: got %q", got)
+	}
+	yaml := "no label here\n```yaml\ncompany: X\nurl: https://boards.greenhouse.io/x/jobs/9\n```\n"
+	if got := extractReportURL(yaml); got != "https://boards.greenhouse.io/x/jobs/9" {
+		t.Errorf("yaml url: got %q", got)
+	}
+	// trailing punctuation trimmed; builtin/localhost skipped in fallback
+	if got := extractReportURL("see https://jobs.lever.co/acme/123)."); got != "https://jobs.lever.co/acme/123" {
+		t.Errorf("fallback trim: got %q", got)
+	}
+	if got := extractReportURL("Tool @ 127.0.0.1 and https://builtin.com/job/x/1 only"); got != "" {
+		t.Errorf("should skip builtin/localhost-only: got %q", got)
+	}
+	if got := extractReportURL("no urls at all"); got != "" {
+		t.Errorf("none: got %q", got)
+	}
+}

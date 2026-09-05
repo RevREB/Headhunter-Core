@@ -131,6 +131,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/evaluate/pause", s.evalPause)
 	mux.HandleFunc("POST /api/evaluate/reeval", s.evalReeval)
 	mux.HandleFunc("GET /api/admin/audit", s.auditIntegrity)
+	mux.HandleFunc("POST /api/admin/remediate", s.remediate)
 	mux.HandleFunc("GET /api/companies", s.companiesList)
 	mux.HandleFunc("GET /api/companies/profile/status", s.profileStatus)
 	mux.HandleFunc("POST /api/companies/profile/pause", s.profilePause)
