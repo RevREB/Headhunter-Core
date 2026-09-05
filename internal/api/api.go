@@ -410,14 +410,11 @@ func (s *Server) importReports(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "received": len(reps), "matched": matched, "unmatched": unmatched, "candidates": len(cands), "cleared": cleared})
 }
 
-// cleanCareerOpsReport strips the machine-summary / submit-log tail career-ops
-// appends, so the rendered report is the human-readable A–G body only.
+// cleanCareerOpsReport preserves the full migrated report. career-ops places its
+// "## Machine Summary" block near the TOP (not the end), so stripping there would
+// drop the whole A–G body; we keep everything and just trim. The small YAML
+// summary block renders harmlessly inline.
 func cleanCareerOpsReport(md string) string {
-	for _, marker := range []string{"\n## Machine Summary", "\n## Submit", "\n<!-- HEADHUNTER:MACHINE_SUMMARY"} {
-		if i := strings.Index(md, marker); i >= 0 {
-			md = md[:i]
-		}
-	}
 	return strings.TrimSpace(md)
 }
 
