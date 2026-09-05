@@ -74,3 +74,33 @@ func (s *Store) QueueStats(ctx context.Context) (waiting, inFlight int, err erro
 		FROM applications WHERE status = 'inbox' AND canonical_id IS NULL`).Scan(&waiting, &inFlight)
 	return
 }
+
+// ClaimedRole is an inbox posting currently claimed for evaluation (in flight).
+type ClaimedRole struct {
+	ID      int64  `json:"id"`
+	Company string `json:"company"`
+	Role    string `json:"role"`
+}
+
+// ClaimedRoles lists the inbox postings currently being evaluated (claimed,
+// oldest claim first), so the UI can show which roles are in flight right now.
+func (s *Store) ClaimedRoles(ctx context.Context) ([]ClaimedRole, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, company, role FROM applications
+		WHERE status = 'inbox' AND canonical_id IS NULL AND eval_claimed_at IS NOT NULL
+		ORDER BY eval_claimed_at
+		LIMIT 20`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ClaimedRole{}
+	for rows.Next() {
+		var c ClaimedRole
+		if err := rows.Scan(&c.ID, &c.Company, &c.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

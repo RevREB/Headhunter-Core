@@ -250,11 +250,15 @@
         <input class="grow" id="q" placeholder="Search company or role…" style="max-width:17rem">
       </div>
     </div>
-    <div class="card pad" id="eval-panel" style="margin-bottom:.8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-      <b>Evaluator</b>
-      <span class="hint" id="eval-line" style="color:var(--muted)">…</span>
-      <button class="btn ghost" id="eval-pause" style="margin-left:auto">Pause</button>
-      <button class="btn ghost" id="eval-reeval" title="Re-queue already-scored jobs to be re-evaluated with the current A–G engine (spends tokens)">Re-evaluate scored</button>
+    <div class="card pad" id="eval-panel" style="margin-bottom:.8rem;display:flex;flex-direction:column;gap:.45rem">
+      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+        <b>Sweep</b><span class="hint" id="sweep-line" style="color:var(--muted)">…</span>
+        <span style="color:var(--line)">|</span>
+        <b>Evaluator</b><span class="hint" id="eval-line" style="color:var(--muted)">…</span>
+        <button class="btn ghost" id="eval-pause" style="margin-left:auto">Pause</button>
+        <button class="btn ghost" id="eval-reeval" title="Re-queue already-scored jobs to be re-evaluated with the current A–G engine (spends tokens)">Re-evaluate scored</button>
+      </div>
+      <div id="eval-active" class="chips" style="display:none"></div>
     </div>
     <div class="tabs" id="pipe-tabs"></div>
     <div class="scroll"><table>
@@ -592,11 +596,33 @@
     clearTimeout(evalTimer); evalTimer=null;
     const line=document.getElementById("eval-line"); if(!line) return;
     const pauseB=document.getElementById("eval-pause");
+    const sweepEl=document.getElementById("sweep-line");
+    const activeBox=document.getElementById("eval-active");
+    // sweep state (scraper operator) — independent of evaluation
+    if(sweepEl){ try{
+      const sc=await fetch("/api/scan/status").then(r=>r.json());
+      if(!sc.operator){ sweepEl.textContent="not available"; }
+      else{
+        const last=sc.lastRun ? `last ${relTime(sc.lastRun)}` : "no run yet";
+        const run=(sc.jobs||[]).filter(j=>j.state==="running").map(j=>j.ats);
+        sweepEl.textContent=sc.running ? `● active — ${run.join(", ")||"scraping"}` : `idle · ${last}`;
+        sweepEl.style.color=sc.running ? "var(--good)" : "var(--muted)";
+      }
+    }catch(e){ sweepEl.textContent="unavailable"; } }
+    // evaluator state
     let s; try{ s=await fetch("/api/evaluate/status").then(r=>r.json()); }catch(e){ return; }
-    if(!s.llm){ line.textContent="evaluator not configured"; pauseB.style.display="none"; return; }
-    const active=(s.waiting+s.inFlight)>0;
-    line.textContent=`${s.enabled?(active?"● running":"idle"):"paused"} · ${s.workers} workers · queue: ${s.waiting} waiting, ${s.inFlight} in-flight · session ✓${s.doneSession} ✗${s.failedSession}`;
+    if(!s.llm){ line.textContent="not configured"; pauseB.style.display="none"; if(activeBox) activeBox.style.display="none"; return; }
+    const busy=(s.waiting+s.inFlight)>0;
+    line.textContent=`${s.enabled?(busy?"● running":"idle"):"paused"} · ${s.workers} allowed · ${s.waiting} waiting, ${s.inFlight} in-flight · session ✓${s.doneSession} ✗${s.failedSession}`;
+    line.style.color=s.enabled&&busy ? "var(--good)" : "var(--muted)";
     pauseB.textContent=s.enabled?"Pause":"Resume";
+    if(activeBox){
+      const act=s.active||[];
+      if(act.length){ activeBox.style.display="flex";
+        activeBox.innerHTML=`<span class="hint" style="color:var(--muted)">evaluating now:</span>`+
+          act.map(a=>`<a class="chip" href="#job/${a.id}" title="Open job record">${esc(a.company)} — ${esc(a.role)}</a>`).join("");
+      } else { activeBox.style.display="none"; activeBox.innerHTML=""; }
+    }
     if(document.getElementById("view-pipeline")?.classList.contains("active")) evalTimer=setTimeout(pollEval,4000);
   }
   function relTime(iso){ const t=new Date(iso); if(isNaN(t)) return iso; const s=Math.floor((Date.now()-t)/1000); if(s<60) return s+"s ago"; if(s<3600) return Math.floor(s/60)+"m ago"; if(s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; }

@@ -584,11 +584,13 @@ func (s *Server) evalStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled, workers := s.evalSettings(r.Context())
 	waiting, claimed, _ := s.Store.QueueStats(r.Context())
+	active, _ := s.Store.ClaimedRoles(r.Context()) // roles in flight right now
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "enabled": enabled, "workers": workers,
 		"waiting": waiting, "inFlight": int(atomic.LoadInt64(&s.evalInFlight)), "claimed": claimed,
 		"doneSession": atomic.LoadInt64(&s.evalDone), "failedSession": atomic.LoadInt64(&s.evalFailed),
-		"llm": s.LLM != nil,
+		"active": active,
+		"llm":    s.LLM != nil,
 	})
 }
 
