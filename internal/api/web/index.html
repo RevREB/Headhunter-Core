@@ -471,6 +471,7 @@
       const rem = (a.remaining||[]).map(x=>`<span class="chip ex">${esc(x)}</span>`).join(" ") || `<span class="hint" style="color:var(--muted)">none</span>`;
       if (box) box.innerHTML = `<div class="card pad">
           <b>Filled in the browser — review &amp; submit via noVNC</b>
+          <div class="hint" style="color:var(--muted);margin-top:.35rem">Opened ${a.url?`<a href="${esc(a.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(a.url)}</a>`:""}${a.clickedApply?` · clicked “${esc(a.clickedApply)}”`:""}</div>
           <div style="margin:.5rem 0"><div class="hint" style="color:var(--muted)">Filled ${(a.filled||[]).length}/${a.fields||0} text fields:</div><div class="chips" style="margin-top:.3rem">${filled}</div></div>
           <div style="margin:.5rem 0"><div class="hint" style="color:var(--muted)">Left for you:</div><div class="chips" style="margin-top:.3rem">${rem}</div></div>
           <div class="hint" style="color:var(--muted);margin-top:.6rem">Take over: <code>kubectl -n headhunter port-forward svc/headhunter-webmcp 6080:6080</code> → <code>http://localhost:6080/vnc.html</code>. Headhunter never submits — that click is yours (CAPTCHA / attestations too).</div>

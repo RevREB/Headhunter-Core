@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -34,11 +35,62 @@ type applyProfile struct {
 	Pronouns string `json:"pronouns"`
 }
 
+// resolveApplyURL rewrites a posting URL to its application form where the ATS
+// uses a well-known path (Lever/Ashby). Greenhouse embeds the form on the job
+// page; everything else falls back to the DOM apply-button click.
+func resolveApplyURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	host := strings.ToLower(u.Host)
+	p := strings.TrimRight(u.Path, "/")
+	switch {
+	case strings.Contains(host, "lever.co"):
+		if !strings.HasSuffix(p, "/apply") {
+			u.Path = p + "/apply"
+			return u.String()
+		}
+	case strings.Contains(host, "ashbyhq.com"):
+		if !strings.HasSuffix(p, "/application") {
+			u.Path = p + "/application"
+			return u.String()
+		}
+	}
+	return raw
+}
+
+// applyCtrlRe matches a clickable link/button in a snapshot; applyNameRe picks
+// the ones that lead to an application form.
+var applyCtrlRe = regexp.MustCompile(`(?m)-\s+(?:link|button)\s+"([^"]*)"\s+\[ref=(e\d+)\]`)
+var applyNameRe = regexp.MustCompile(`(?i)^\s*apply\b|apply now|apply for|apply to this|submit application|start application`)
+
+// findApplyControl returns the first Apply-like control in a snapshot.
+func findApplyControl(snap string) (name, ref string, ok bool) {
+	for _, m := range applyCtrlRe.FindAllStringSubmatch(snap, -1) {
+		if applyNameRe.MatchString(m[1]) {
+			return m[1], m[2], true
+		}
+	}
+	return "", "", false
+}
+
 // snapField is a form field parsed from the accessibility snapshot.
 type snapField struct {
 	Role string
 	Name string
 	Ref  string
+}
+
+// countTextFields counts fillable text/combobox fields in a snapshot.
+func countTextFields(fields []snapField) int {
+	n := 0
+	for _, f := range fields {
+		if f.Role == "textbox" || f.Role == "combobox" {
+			n++
+		}
+	}
+	return n
 }
 
 // snapRe matches a snapshot line: - textbox "Email address" [ref=e11]
@@ -139,11 +191,12 @@ func splitAddress(addr string) (street, city, state, zip string) {
 
 // applyResult is the handoff report returned to the UI.
 type applyResult struct {
-	URL       string   `json:"url"`
-	Filled    []string `json:"filled"`
-	Remaining []string `json:"remaining"` // unmatched text fields the human should complete
-	Fields    int      `json:"fields"`
-	Handoff   string   `json:"handoff"`
+	URL          string   `json:"url"`          // the URL actually opened (after resolution)
+	ClickedApply string   `json:"clickedApply"` // the Apply control clicked to reach the form, if any
+	Filled       []string `json:"filled"`
+	Remaining    []string `json:"remaining"` // unmatched text fields the human should complete
+	Fields       int      `json:"fields"`
+	Handoff      string   `json:"handoff"`
 }
 
 // prepareApplication drives WebMCP to open the URL and fill the safe identity
@@ -159,14 +212,27 @@ func (s *Server) prepareApplication(ctx context.Context, applyURL string) (*appl
 	if err := cl.Initialize(ctx); err != nil {
 		return nil, err
 	}
-	if err := cl.Navigate(ctx, applyURL); err != nil {
+	target := resolveApplyURL(applyURL) // known-ATS fast path (Lever/Ashby)
+	if err := cl.Navigate(ctx, target); err != nil {
 		return nil, err
 	}
 	snap, err := cl.Snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	res := &applyResult{URL: applyURL, Filled: []string{}, Remaining: []string{}}
+	res := &applyResult{URL: target, Filled: []string{}, Remaining: []string{}}
+	// If the opened page has no fillable form, try to reach one by clicking an
+	// "Apply" control (covers Built In, embedded flows, and unknown ATSes).
+	if countTextFields(parseSnapshot(snap)) == 0 {
+		if name, ref, ok := findApplyControl(snap); ok {
+			if err := cl.Click(ctx, name, ref); err == nil {
+				_ = cl.WaitTime(ctx, 2) // let the form render
+				if s2, err := cl.Snapshot(ctx); err == nil {
+					snap, res.ClickedApply = s2, name
+				}
+			}
+		}
+	}
 	var fills []webmcp.FillField
 	for _, f := range parseSnapshot(snap) {
 		if f.Role != "textbox" && f.Role != "combobox" {

@@ -174,3 +174,16 @@ func (c *Client) FillForm(ctx context.Context, fields []FillField) error {
 	_, err := c.CallTool(ctx, "browser_fill_form", map[string]any{"fields": fields})
 	return err
 }
+
+// Click clicks an element (used to reach an application form behind an "Apply"
+// button). element is a human-readable label; ref comes from the snapshot.
+func (c *Client) Click(ctx context.Context, element, ref string) error {
+	_, err := c.CallTool(ctx, "browser_click", map[string]any{"element": element, "ref": ref})
+	return err
+}
+
+// WaitTime waits the given seconds for a form to render after a click/navigation.
+func (c *Client) WaitTime(ctx context.Context, secs float64) error {
+	_, err := c.CallTool(ctx, "browser_wait_for", map[string]any{"time": secs})
+	return err
+}
