@@ -144,6 +144,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/applications/{id}/status", s.setStatus)
 	mux.HandleFunc("POST /api/scan/ingest", s.ingest)
 	mux.HandleFunc("POST /api/import/tracker", s.importTracker)
+	mux.HandleFunc("POST /api/import/reports", s.importReports)
 	mux.HandleFunc("GET /api/config", s.getConfig)
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
@@ -335,6 +336,75 @@ func (s *Server) importTracker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "parsed": len(rows), "imported": n})
+}
+
+// importReports migrates career-ops's generated reports onto the imported tracker
+// apps that lack one, matching by normalized company+role. IMPORT_TOKEN-guarded.
+// Imported apps have no JD so they can't be re-evaluated — this recovers the
+// evaluations career-ops already produced.
+func (s *Server) importReports(w http.ResponseWriter, r *http.Request) {
+	token := os.Getenv("IMPORT_TOKEN")
+	if token == "" || r.Header.Get("X-Import-Token") != token {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body: " + err.Error()})
+		return
+	}
+	var reps []struct {
+		Company  string `json:"company"`
+		Role     string `json:"role"`
+		Markdown string `json:"markdown"`
+	}
+	if err := json.Unmarshal(body, &reps); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected [{company,role,markdown}]"})
+		return
+	}
+	cands, err := s.Store.ImportedCandidates(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	queue := map[string][]int64{}
+	for _, c := range cands {
+		k := engine.DedupKey(c.Company, c.Role)
+		queue[k] = append(queue[k], c.ID)
+	}
+	matched, unmatched := 0, 0
+	for _, rep := range reps {
+		k := engine.DedupKey(rep.Company, rep.Role)
+		q := queue[k]
+		if len(q) == 0 {
+			unmatched++
+			continue
+		}
+		id := q[0]
+		queue[k] = q[1:]
+		if err := s.Store.AttachReport(r.Context(), id, cleanCareerOpsReport(rep.Markdown)); err != nil {
+			log.Printf("importReports: attach %d: %v", id, err)
+			unmatched++
+			continue
+		}
+		matched++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "received": len(reps), "matched": matched, "unmatched": unmatched, "candidates": len(cands)})
+}
+
+// cleanCareerOpsReport strips the machine-summary / submit-log tail career-ops
+// appends, so the rendered report is the human-readable A–G body only.
+func cleanCareerOpsReport(md string) string {
+	for _, marker := range []string{"\n## Machine Summary", "\n## Submit", "\n<!-- HEADHUNTER:MACHINE_SUMMARY"} {
+		if i := strings.Index(md, marker); i >= 0 {
+			md = md[:i]
+		}
+	}
+	return strings.TrimSpace(md)
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
