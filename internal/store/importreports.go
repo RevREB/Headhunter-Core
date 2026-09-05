@@ -37,6 +37,17 @@ func (s *Store) ImportedCandidates(ctx context.Context) ([]ImportedCandidate, er
 	return out, rows.Err()
 }
 
+// ClearImportedReports removes migrated (markdown-only) reports so a re-import can
+// replace them, e.g. with the fuller of several career-ops report files. A–G
+// reports carry a "summary" key and are left untouched.
+func (s *Store) ClearImportedReports(ctx context.Context) (int, error) {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM reports WHERE NOT (doc ? 'summary')`)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // AttachReport stores a migrated career-ops report (markdown only) on an app,
 // leaving its imported status/score untouched.
 func (s *Store) AttachReport(ctx context.Context, id int64, markdown string) error {

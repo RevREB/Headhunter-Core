@@ -366,6 +366,13 @@ func (s *Server) importReports(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected [{company,role,markdown}]"})
 		return
 	}
+	cleared := 0
+	if r.URL.Query().Get("replace") == "true" {
+		if cleared, err = s.Store.ClearImportedReports(r.Context()); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	cands, err := s.Store.ImportedCandidates(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -376,24 +383,31 @@ func (s *Server) importReports(w http.ResponseWriter, r *http.Request) {
 		k := engine.DedupKey(c.Company, c.Role)
 		queue[k] = append(queue[k], c.ID)
 	}
-	matched, unmatched := 0, 0
+	// Group reports by key and assign the LONGEST first — some company+roles have
+	// several report files (re-evals / stubs); the fullest is the one to keep.
+	byKey := map[string][]string{}
 	for _, rep := range reps {
 		k := engine.DedupKey(rep.Company, rep.Role)
-		q := queue[k]
-		if len(q) == 0 {
-			unmatched++
-			continue
-		}
-		id := q[0]
-		queue[k] = q[1:]
-		if err := s.Store.AttachReport(r.Context(), id, cleanCareerOpsReport(rep.Markdown)); err != nil {
-			log.Printf("importReports: attach %d: %v", id, err)
-			unmatched++
-			continue
-		}
-		matched++
+		byKey[k] = append(byKey[k], cleanCareerOpsReport(rep.Markdown))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "received": len(reps), "matched": matched, "unmatched": unmatched, "candidates": len(cands)})
+	matched, unmatched := 0, 0
+	for k, mds := range byKey {
+		sort.Slice(mds, func(i, j int) bool { return len(mds[i]) > len(mds[j]) })
+		ids := queue[k]
+		for i, md := range mds {
+			if i >= len(ids) {
+				unmatched++
+				continue
+			}
+			if err := s.Store.AttachReport(r.Context(), ids[i], md); err != nil {
+				log.Printf("importReports: attach %d: %v", ids[i], err)
+				unmatched++
+				continue
+			}
+			matched++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "received": len(reps), "matched": matched, "unmatched": unmatched, "candidates": len(cands), "cleared": cleared})
 }
 
 // cleanCareerOpsReport strips the machine-summary / submit-log tail career-ops
