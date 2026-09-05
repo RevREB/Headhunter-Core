@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,7 +40,16 @@ func FromEnv() *Client {
 	if model == "" {
 		model = "guardrails/claude-sonnet-5"
 	}
-	return &Client{BaseURL: strings.TrimRight(base, "/"), Model: model, Key: key, HTTP: &http.Client{Timeout: 180 * time.Second}}
+	// A–G report generation (large, non-streaming) regularly runs ~140s through
+	// Bifrost; 180s was too tight, so slow-but-valid calls timed out and then
+	// burned 3 retries. Default to 300s; override with OPENAI_TIMEOUT_SEC.
+	timeout := 300 * time.Second
+	if v := os.Getenv("OPENAI_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			timeout = time.Duration(n) * time.Second
+		}
+	}
+	return &Client{BaseURL: strings.TrimRight(base, "/"), Model: model, Key: key, HTTP: &http.Client{Timeout: timeout}}
 }
 
 // Stream sends messages and invokes onDelta for each streamed content chunk.
