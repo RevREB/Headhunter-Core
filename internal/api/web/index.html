@@ -458,6 +458,27 @@
   }
   window.hhSet = setStatus;
 
+  window.hhApply = async function(id, btn){
+    const box = document.getElementById("apply-result");
+    if (btn) btn.disabled = true;
+    if (box) box.innerHTML = `<div class="card pad"><span class="hint" style="color:var(--muted)">Opening the application in the WebMCP browser and filling identity fields… ~10–20s.</span></div>`;
+    try {
+      const r = await fetch(`/api/applications/${id}/apply`, { method:"POST" });
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok) { if(box) box.innerHTML = `<div class="card pad" style="border-color:var(--bad)"><b>Apply failed:</b> ${esc(d.error||r.status)}</div>`; if(btn) btn.disabled=false; return; }
+      const a = d.apply || {};
+      const filled = (a.filled||[]).map(x=>`<span class="chip src">${esc(x)}</span>`).join(" ") || `<span class="hint" style="color:var(--muted)">none matched</span>`;
+      const rem = (a.remaining||[]).map(x=>`<span class="chip ex">${esc(x)}</span>`).join(" ") || `<span class="hint" style="color:var(--muted)">none</span>`;
+      if (box) box.innerHTML = `<div class="card pad">
+          <b>Filled in the browser — review &amp; submit via noVNC</b>
+          <div style="margin:.5rem 0"><div class="hint" style="color:var(--muted)">Filled ${(a.filled||[]).length}/${a.fields||0} text fields:</div><div class="chips" style="margin-top:.3rem">${filled}</div></div>
+          <div style="margin:.5rem 0"><div class="hint" style="color:var(--muted)">Left for you:</div><div class="chips" style="margin-top:.3rem">${rem}</div></div>
+          <div class="hint" style="color:var(--muted);margin-top:.6rem">Take over: <code>kubectl -n headhunter port-forward svc/headhunter-webmcp 6080:6080</code> → <code>http://localhost:6080/vnc.html</code>. Headhunter never submits — that click is yours (CAPTCHA / attestations too).</div>
+        </div>`;
+    } catch(e){ if(box) box.innerHTML = `<div class="card pad" style="border-color:var(--bad)">error: ${esc(e)}</div>`; }
+    if (btn) btn.disabled = false;
+  };
+
   function renderAll(){ renderToday(); renderPipe(); renderAnalytics(); renderExplore(); renderPortals(); renderConfig(); renderProfile(); }
 
   function renderToday() {
@@ -549,6 +570,7 @@
 
     const acts = [];
     if (d.status==="inbox" || d.status==="evaluated"){
+      acts.push(`<button class="btn" onclick="hhApply(${d.id},this)" title="Open this posting in the WebMCP browser and fill your identity fields; you review and submit via noVNC">Apply (fill in browser)</button>`);
       acts.push(`<button class="btn go" onclick="hhSet(${d.id},'applied',this)">Mark applied</button>`);
       acts.push(`<button class="btn ghost" onclick="hhSet(${d.id},'skip',this)">Skip</button>`);
     }
@@ -595,6 +617,7 @@
         <p style="font-size:1.05rem;color:var(--ink);margin-top:.6rem">${esc(d.role)}</p>
       </div>
       ${acts.length?`<div class="toolbar">${acts.join("")}</div>`:""}
+      <div id="apply-result"></div>
       <div class="card"><div class="meta-grid">${meta.map(m=>`<div class="mrow"><div class="mk">${esc(m[0])}</div><div class="mv">${m[2]?m[1]:esc(m[1])}</div></div>`).join("")}</div></div>
       ${reportHtml}
       ${rawHtml}

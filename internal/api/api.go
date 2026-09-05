@@ -118,6 +118,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/applications", s.listApplications)
 	mux.HandleFunc("GET /api/applications/{id}", s.getApplication)
 	mux.HandleFunc("POST /api/applications/{id}/status", s.setStatus)
+	mux.HandleFunc("POST /api/applications/{id}/apply", s.applyJob)
 	mux.HandleFunc("POST /api/scan/ingest", s.ingest)
 	mux.HandleFunc("POST /api/import/tracker", s.importTracker)
 	mux.HandleFunc("POST /api/import/reports", s.importReports)
