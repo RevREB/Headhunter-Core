@@ -105,6 +105,19 @@ func (c *Client) Complete(ctx context.Context, msgs []Msg) (string, error) {
 	return c.complete(ctx, map[string]any{"model": c.Model, "messages": msgs, "stream": false})
 }
 
+// CompleteModel is CompleteWith on an explicit model (empty = the client's
+// default) — for cheap off-path passes like company-profile synthesis.
+func (c *Client) CompleteModel(ctx context.Context, model string, msgs []Msg, temperature float64, maxTokens int) (string, error) {
+	if model == "" {
+		model = c.Model
+	}
+	req := map[string]any{"model": model, "messages": msgs, "stream": false, "temperature": temperature}
+	if maxTokens > 0 {
+		req["max_tokens"] = maxTokens
+	}
+	return c.complete(ctx, req)
+}
+
 func (c *Client) complete(ctx context.Context, reqBody map[string]any) (string, error) {
 	body, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(body))

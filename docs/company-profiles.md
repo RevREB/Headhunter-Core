@@ -88,9 +88,18 @@ with source badges, the company's postings).
 
 1. **Done** — entity + link + backfill; deterministic sourcing consumer; the
    four free enrichers; Companies list/detail UI.
-2. Evaluator integration — inject the provenance-marked profile into eval
-   context; deterministic exclusion gate (flags → hard-stop, no LLM); cheap lazy
-   synthesis pass for the narrative.
-3. Graph **edges** (`company_edges`: same_ats, same_industry, shared_investor,
-   competitor) → "companies similar to ones I scored ≥4" sourcing.
-4. Crunchbase enricher (licensed) — drops in as one more provenance source.
+2. **Done** — evaluator integration: the provenance-marked profile is injected
+   into the A–G eval context (agprompt.md §INPUTS, with the invariant that
+   `inferred` facts can't create/clear a hard stop); a deterministic exclusion
+   gate hard-stops flagged companies (casino) at score 0.3 with **no LLM call**;
+   a cheap, lazy synthesis pass composes the briefing on view (SYNTH_MODEL,
+   off-path, cached, once per company).
+3. **Done** — the graph: `SimilarCompanies` derives edges live (shared ATS or
+   industry) → "Similar companies" on the detail page; `ATSDiscoveries` surfaces
+   companies whose ATS we inferred → the "ATS discovery" panel (library
+   expansion). Materialized `company_edges` + more edge types (shared_investor)
+   remain a future optimization if live queries don't scale.
+4. **EDGAR live** — `ENRICH_UA` set via a SOPS-encrypted secret
+   (`enrich-secret.sops.yaml`), so `stage`/`ticker` now populate for US public
+   companies.
+5. Crunchbase enricher (licensed) — drops in as one more provenance source.

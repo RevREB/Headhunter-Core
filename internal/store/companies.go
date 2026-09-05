@@ -277,3 +277,118 @@ func (s *Store) GetCompany(ctx context.Context, id int64) (*CompanyDetail, error
 	}
 	return &d, rows.Err()
 }
+
+// ---- Phase 2/3: eval context, synthesis, graph ----
+
+// CompanyContext is a company's profile as evaluator context.
+type CompanyContext struct {
+	Name    string          `json:"name"`
+	Flags   []string        `json:"flags"`
+	Profile json.RawMessage `json:"profile"`
+}
+
+// CompanyContextForApp returns the company profile + flags for an application,
+// or nil when the application has no linked company.
+func (s *Store) CompanyContextForApp(ctx context.Context, appID int64) (*CompanyContext, error) {
+	var c CompanyContext
+	err := s.Pool.QueryRow(ctx, `
+		SELECT c.name, c.flags, c.profile
+		FROM companies c JOIN applications a ON a.company_id = c.id
+		WHERE a.id = $1`, appID).Scan(&c.Name, &c.Flags, &c.Profile)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+// SetCompanySummary writes just the (LLM-synthesized) summary into a profile,
+// leaving sourced fields and profiled_at untouched.
+func (s *Store) SetCompanySummary(ctx context.Context, id int64, summary string) error {
+	b, _ := json.Marshal(summary)
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE companies
+		SET profile = jsonb_set(coalesce(profile, '{}'::jsonb), '{summary}', $2::jsonb), updated_at = now()
+		WHERE id = $1`, id, b)
+	return err
+}
+
+// SimilarCompanies returns companies sharing an ATS or an industry with the
+// given company (the graph edges, computed live), best average score first.
+func (s *Store) SimilarCompanies(ctx context.Context, id int64, limit int) ([]CompanyRow, error) {
+	rows, err := s.Pool.Query(ctx, `
+		WITH me AS (
+			SELECT coalesce(profile #>> '{fields,ats,value}', '') AS ats,
+			       coalesce(profile #> '{fields,industry,value}', '[]'::jsonb) AS ind
+			FROM companies WHERE id = $1)
+		SELECT c.id, c.name, coalesce(c.domain,''), c.flags,
+		       count(a.id) AS postings, avg(a.score)::float8 AS avg_score,
+		       (c.profiled_at IS NOT NULL) AS profiled,
+		       coalesce(c.profile #>> '{fields,employees,value}', '') AS size,
+		       coalesce(c.profile #>> '{fields,stage,value}', '') AS stage,
+		       coalesce(c.profile #>> '{fields,ats,value}', '') AS ats
+		FROM companies c, me
+		LEFT JOIN applications a ON a.company_id = c.id
+		WHERE c.id <> $1 AND (
+			(me.ats <> '' AND c.profile #>> '{fields,ats,value}' = me.ats)
+			OR (jsonb_array_length(me.ind) > 0
+			    AND c.profile #> '{fields,industry,value}' ?| (SELECT array_agg(v) FROM jsonb_array_elements_text(me.ind) v)))
+		GROUP BY c.id, me.ats, me.ind
+		ORDER BY avg_score DESC NULLS LAST, postings DESC
+		LIMIT $2`, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []CompanyRow{}
+	for rows.Next() {
+		var r CompanyRow
+		var avg *float64
+		if err := rows.Scan(&r.ID, &r.Name, &r.Domain, &r.Flags, &r.Postings, &avg, &r.Profiled, &r.Size, &r.Stage, &r.ATS); err != nil {
+			return nil, err
+		}
+		r.AvgScore = avg
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ATSDiscovery is a company whose ATS was inferred from its postings — a
+// candidate to add to the per-ATS scraper (library expansion).
+type ATSDiscovery struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	ATS      string `json:"ats"`
+	Host     string `json:"host,omitempty"`
+	Postings int    `json:"postings"`
+}
+
+// ATSDiscoveries lists companies with a detected ATS, best-covered first, so the
+// operator can grow the scraper catalog from what the aggregator surfaced.
+func (s *Store) ATSDiscoveries(ctx context.Context) ([]ATSDiscovery, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT c.id, c.name,
+		       c.profile #>> '{fields,ats,value}' AS ats,
+		       coalesce(c.profile #>> '{fields,ats,detail}', '') AS host,
+		       count(a.id) AS postings
+		FROM companies c
+		LEFT JOIN applications a ON a.company_id = c.id
+		WHERE c.profile #>> '{fields,ats,value}' IS NOT NULL
+		GROUP BY c.id
+		ORDER BY (c.profile #>> '{fields,ats,value}'), count(a.id) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ATSDiscovery{}
+	for rows.Next() {
+		var d ATSDiscovery
+		if err := rows.Scan(&d.ID, &d.Name, &d.ATS, &d.Host, &d.Postings); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
