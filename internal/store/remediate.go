@@ -45,8 +45,14 @@ func (s *Store) BackfillURLsFromReports(ctx context.Context, apply bool, extract
 		return candidates, 0, nil
 	}
 	for _, h := range hits {
+		// url is UNIQUE: a recovered URL may already belong to a scraped record
+		// (this import is a duplicate of it) or to an earlier row in this batch.
+		// Skip those rather than violating the constraint — they stay url-less as
+		// known duplicates.
 		tag, e := s.Pool.Exec(ctx,
-			`UPDATE applications SET url = $2, updated_at = now() WHERE id = $1 AND coalesce(url,'') = ''`, h.id, h.url)
+			`UPDATE applications SET url = $2, updated_at = now()
+			 WHERE id = $1 AND coalesce(url,'') = ''
+			   AND NOT EXISTS (SELECT 1 FROM applications x WHERE x.url = $2)`, h.id, h.url)
 		if e != nil {
 			return candidates, updated, e
 		}
