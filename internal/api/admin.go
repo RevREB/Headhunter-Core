@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"regexp"
@@ -66,6 +67,36 @@ func (s *Server) remediate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// applyMinScore reads the config'd minimum apply score (the below/above line),
+// defaulting to 3.0.
+func (s *Server) applyMinScore(r *http.Request) float64 {
+	min := 3.0
+	if cfg, err := s.Store.GetAllConfig(r.Context()); err == nil {
+		if raw, ok := cfg["apply_min_score"]; ok {
+			var v float64
+			if json.Unmarshal(raw, &v) == nil && v > 0 {
+				min = v
+			}
+		}
+	}
+	return min
+}
+
+// tuning splits the discard pile into below-the-line (scan-tuning) and pass-overs
+// (rubric-tuning), against the config'd apply_min_score.
+func (s *Server) tuning(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	rep, err := s.Store.DiscardTuning(r.Context(), s.applyMinScore(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "tuning": rep})
 }
 
 // auditIntegrity is a read-only data-integrity report — the forensic basis for a

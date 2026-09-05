@@ -191,6 +191,7 @@
     <a href="#followups" data-view="followups"><span class="ic">↻</span><span>Follow-ups</span></a>
     <a href="#portals" data-view="portals"><span class="ic">◎</span><span>Portals</span></a>
     <a href="#analytics" data-view="analytics"><span class="ic">▤</span><span>Analytics</span></a>
+    <a href="#tuning" data-view="tuning"><span class="ic">⚗</span><span>Tuning</span><span class="tag">NEW</span></a>
     <a href="#profile" data-view="profile"><span class="ic">▦</span><span>Profile</span></a>
     <a href="#config" data-view="config"><span class="ic">⚙</span><span>Config</span></a>
   </nav>
@@ -322,6 +323,15 @@
   </section>
 
   <!-- CONFIG -->
+  <section class="view" id="view-tuning">
+    <div class="hero">
+      <div class="kicker">Tuning</div>
+      <h1>Learn from every <b>“no”</b></h1>
+      <p>Discards split at the apply-minimum line into two signals: <b>below the line</b> tunes what gets scanned; <b>pass-overs</b> (above the line, you declined) tune the evaluator. Set the line in Config.</p>
+    </div>
+    <div id="tuning-body"><div class="empty">loading…</div></div>
+  </section>
+
   <section class="view" id="view-companies">
     <div class="hero">
       <div class="kicker">Companies</div>
@@ -358,7 +368,10 @@
     <div class="card"><div class="row"><div class="who"><div class="co">Company logos</div><div class="ro">Show each company's real logo, cached on disk. Off = colored monograms.</div></div>
       <div class="toggle on" id="cfg-logos"><i></i></div></div></div>
     <h2 class="sec">Evaluation</h2>
-    <div class="card pad"><div class="fld"><label>Sweep concurrency</label><div class="d">how many A–G evaluations run in parallel (1–20)</div><input type="number" min="1" max="20" id="cfg-concurrency"></div></div>
+    <div class="card pad">
+      <div class="fld"><label>Sweep concurrency</label><div class="d">how many A–G evaluations run in parallel (1–20)</div><input type="number" min="1" max="20" id="cfg-concurrency"></div>
+      <div class="fld" style="margin-top:.8rem"><label>Apply minimum score — "the line"</label><div class="d">roles scored below this are <b>below the line</b> (tune what gets scanned); at/above but declined are <b>pass-overs</b> (tune the evaluator). Not an auto-discard — just the classification line. (0–5)</div><input type="number" min="0" max="5" step="0.1" id="cfg-minscore"></div>
+    </div>
     <h2 class="sec">Follow-up cadence <span class="hint">days — the same values the engine uses</span></h2>
     <div class="card pad"><div class="form2" id="cadence"></div>
       <div style="margin-top:1rem"><button class="btn go" id="cfg-save">Save config</button> <span class="hint" id="cfg-saved" style="color:var(--muted)"></span></div>
@@ -484,6 +497,26 @@
     if (btn) btn.disabled = false;
   };
 
+  const DISCARD_REASONS = [["below_bar","Below the bar"],["comp","Comp too low"],["location","Location / onsite"],["company","Company"],["seniority","Seniority mismatch"],["stale","Stale / closed"],["duplicate","Duplicate"],["other","Other"]];
+  window.hhToggleDiscard = function(id){
+    const box = document.getElementById("discard-reasons"); if(!box) return;
+    if (box.style.display !== "none") { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.innerHTML = `<div class="card pad"><div class="hint" style="color:var(--muted);margin-bottom:.45rem">Why pass on this role? (below-the-bar tunes scans; above-the-line reasons tune the evaluator)</div><div class="chips">`+
+      DISCARD_REASONS.map(rr=>`<button class="chip" style="cursor:pointer" onclick="hhDiscard(${id},'${rr[0]}',this)">${esc(rr[1])}</button>`).join(" ")+`</div></div>`;
+  };
+  window.hhDiscard = async function(id, reason, btn){
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch(`/api/applications/${id}/status`, { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({to:"discarded", reason}) });
+      if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.error || "discard failed"); if(btn) btn.disabled=false; return; }
+      const app = ALL.find(x=>x.id===id); if (app) app.status = "discarded";
+      STATS.discarded = (STATS.discarded||0)+1;
+      renderAll();
+      if (location.hash.startsWith("#job/")) loadJob(location.hash.split("/")[1]);
+    } catch(e){ alert(e); if(btn) btn.disabled=false; }
+  };
+
   function renderAll(){ renderToday(); renderPipe(); renderAnalytics(); renderExplore(); renderPortals(); renderConfig(); renderProfile(); }
 
   function renderToday() {
@@ -577,7 +610,7 @@
     if (d.status==="inbox" || d.status==="evaluated"){
       acts.push(`<button class="btn" onclick="hhApply(${d.id},this)" title="Open this posting in the WebMCP browser and fill your identity fields; you review and submit via noVNC">Apply (fill in browser)</button>`);
       acts.push(`<button class="btn go" onclick="hhSet(${d.id},'applied',this)">Mark applied</button>`);
-      acts.push(`<button class="btn ghost" onclick="hhSet(${d.id},'skip',this)">Skip</button>`);
+      acts.push(`<button class="btn ghost" onclick="hhToggleDiscard(${d.id})">Discard…</button>`);
     }
     if (d.status==="applied" || d.status==="responded"){
       acts.push(`<button class="btn" onclick="hhSet(${d.id},'responded',this)">Responded</button>`);
@@ -622,6 +655,7 @@
         <p style="font-size:1.05rem;color:var(--ink);margin-top:.6rem">${esc(d.role)}</p>
       </div>
       ${acts.length?`<div class="toolbar">${acts.join("")}</div>`:""}
+      <div id="discard-reasons" style="display:none"></div>
       <div id="apply-result"></div>
       <div class="card"><div class="meta-grid">${meta.map(m=>`<div class="mrow"><div class="mk">${esc(m[0])}</div><div class="mv">${m[2]?m[1]:esc(m[1])}</div></div>`).join("")}</div></div>
       ${reportHtml}
@@ -696,6 +730,7 @@
   function renderConfig() {
     document.getElementById("cadence").innerHTML = CAD.map(c=>`<div class="fld"><label>${c[1]}</label><div class="d">${c[2]}</div><input type="number" min="0" id="cad-${c[0]}" value="${cadence[c[0]]}"></div>`).join("");
     const cc=document.getElementById("cfg-concurrency"); if(cc) cc.value = (CONFIG.eval_concurrency!=null ? CONFIG.eval_concurrency : 6);
+    const ms=document.getElementById("cfg-minscore"); if(ms) ms.value = (CONFIG.apply_min_score!=null ? CONFIG.apply_min_score : 3);
   }
   // Profile: the search criteria the evaluator reads, plus the résumé. Field
   // values live in config['profile'] (a JSON object) — never in this source.
@@ -756,6 +791,7 @@
     CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value));
     saveConfig("cadence", cadence, document.getElementById("cfg-saved"));
     saveConfig("eval_concurrency", Math.max(1, Math.min(20, Number(document.getElementById("cfg-concurrency").value)||6)), null);
+    saveConfig("apply_min_score", Math.max(0, Math.min(5, Number(document.getElementById("cfg-minscore").value)||3)), null);
   };
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
   document.getElementById("profile-save").onclick = async e => {
@@ -784,6 +820,27 @@
     pipeSort = { col: c, dir: pipeSort.col===c ? -pipeSort.dir : ((c==="score"||c==="createdAt") ? -1 : 1) };
     renderPipe();
   }));
+
+  // ---- tuning ----
+  async function renderTuning(){
+    const body = document.getElementById("tuning-body"); if(!body) return;
+    let t; try { t = (await fetch("/api/tuning").then(r=>r.json())).tuning; } catch(e){ body.innerHTML = `<div class="empty">error loading</div>`; return; }
+    const bl = t.belowLine, po = t.passOver;
+    const coRows = (bl.topCompanies||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">none</td></tr>`;
+    const reasonRows = (po.byReason||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">no pass-overs recorded yet</td></tr>`;
+    body.innerHTML = `
+      <div class="funnel" style="margin-bottom:1rem">
+        <div class="stage"><div class="n">${t.minScore}</div><div class="l">apply-min line</div></div>
+        <div class="stage"><div class="n">${bl.total}</div><div class="l">below the line</div></div>
+        <div class="stage"><div class="n">${po.total}</div><div class="l">pass-overs (above)</div></div>
+      </div>
+      <h2 class="sec">Below the line <span class="hint">scored &lt; ${t.minScore} and discarded — signal to tune scans (scraped only: ${bl.scraped})</span></h2>
+      <div class="scroll"><table><thead><tr><th>Company (top sources of below-bar scans)</th><th class="num">Discarded</th></tr></thead><tbody>${coRows}</tbody></table></div>
+      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">Companies flooding the inbox with below-bar roles are candidates to drop from the scan-catalog or narrow with keywords.</p>
+      <h2 class="sec">Pass-overs <span class="hint">scored ≥ ${t.minScore} but you declined — signal to tune the evaluator</span></h2>
+      <div class="scroll"><table><thead><tr><th>Reason you passed</th><th class="num">Count</th></tr></thead><tbody>${reasonRows}</tbody></table></div>
+      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">These are the evaluator's false positives: it rated them apply-worthy, you didn't. The dominant reasons point at rubric weights (comp, location, company) the A–G prompt should weigh harder.</p>`;
+  }
 
   // ---- companies ----
   let COMPANIES = [], cprofileTimer = null;
@@ -955,6 +1012,7 @@
     if (v === "explore") renderScanStatus();
     if (v === "pipeline") pollEval();
     if (v === "companies") { renderCompanies(); pollCompanyProfile(); loadDiscoveries(); }
+    if (v === "tuning") renderTuning();
   }
   window.addEventListener("hashchange", route);
   route(); load();

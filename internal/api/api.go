@@ -132,6 +132,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/evaluate/reeval", s.evalReeval)
 	mux.HandleFunc("GET /api/admin/audit", s.auditIntegrity)
 	mux.HandleFunc("POST /api/admin/remediate", s.remediate)
+	mux.HandleFunc("GET /api/tuning", s.tuning)
 	mux.HandleFunc("GET /api/companies", s.companiesList)
 	mux.HandleFunc("GET /api/companies/profile/status", s.profileStatus)
 	mux.HandleFunc("POST /api/companies/profile/pause", s.profilePause)
@@ -280,13 +281,14 @@ func (s *Server) setStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		To string `json:"to"`
+		To     string `json:"to"`
+		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected {\"to\":\"...\"}"})
 		return
 	}
-	if err := s.Store.SetStatus(r.Context(), id, body.To); err != nil {
+	if err := s.Store.SetStatus(r.Context(), id, body.To, body.Reason); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	}

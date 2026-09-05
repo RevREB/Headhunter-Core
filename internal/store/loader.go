@@ -54,7 +54,7 @@ func (s *Store) LoadTracker(ctx context.Context, rows []importer.TrackerRow) (in
 
 // SetStatus transitions an application, validated by the engine state machine,
 // and appends a status event.
-func (s *Store) SetStatus(ctx context.Context, id int64, to string) error {
+func (s *Store) SetStatus(ctx context.Context, id int64, to, reason string) error {
 	var cur string
 	if err := s.Pool.QueryRow(ctx, `SELECT status::text FROM applications WHERE id=$1`, id).Scan(&cur); err != nil {
 		return err
@@ -67,13 +67,16 @@ func (s *Store) SetStatus(ctx context.Context, id int64, to string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	// disposition_reason tracks why a role was passed on; a transition without a
+	// reason (e.g. Mark applied) clears it.
 	if _, err := tx.Exec(ctx,
-		`UPDATE applications SET status=$2::application_status, updated_at=now() WHERE id=$1`, id, to); err != nil {
+		`UPDATE applications SET status=$2::application_status, disposition_reason=nullif($3,''), updated_at=now() WHERE id=$1`,
+		id, to, reason); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO status_events (application_id, from_status, to_status, source, at)
-		 VALUES ($1, $2::application_status, $3::application_status, 'ui', now())`, id, cur, to); err != nil {
+		`INSERT INTO status_events (application_id, from_status, to_status, source, note, at)
+		 VALUES ($1, $2::application_status, $3::application_status, 'ui', nullif($4,''), now())`, id, cur, to, reason); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
