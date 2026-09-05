@@ -247,21 +247,14 @@
     <div class="hero" style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap">
       <div><div class="kicker">Pipeline</div><h1 id="pipe-head">The tracker</h1></div>
       <div style="display:flex;gap:.6rem;align-items:center">
-        <button class="btn go" id="pipe-eval" title="Score the next 10 inbox postings against your CV">✦ Evaluate 10</button>
         <input class="grow" id="q" placeholder="Search company or role…" style="max-width:17rem">
       </div>
     </div>
-    <div class="card pad" id="sweep-panel" style="margin-bottom:.8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-      <b>A–G sweep</b>
-      <select id="sweep-scope" style="max-width:15rem">
-        <option value="inbox">Inbox (unevaluated)</option>
-        <option value="evaluated">Re-evaluate evaluated</option>
-        <option value="all">All (inbox + evaluated)</option>
-      </select>
-      <button class="btn go" id="sweep-start">⚡ Start sweep</button>
-      <button class="btn ghost" id="sweep-stop" style="display:none">Stop</button>
-      <span class="hint" id="sweep-line" style="color:var(--muted);margin-left:auto"></span>
-      <div class="bar" id="sweep-bar" style="flex-basis:100%;display:none;margin-top:.2rem"><i style="width:0%"></i></div>
+    <div class="card pad" id="eval-panel" style="margin-bottom:.8rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+      <b>Evaluator</b>
+      <span class="hint" id="eval-line" style="color:var(--muted)">…</span>
+      <button class="btn ghost" id="eval-pause" style="margin-left:auto">Pause</button>
+      <button class="btn ghost" id="eval-reeval" title="Re-queue already-scored jobs to be re-evaluated with the current A–G engine (spends tokens)">Re-evaluate scored</button>
     </div>
     <div class="tabs" id="pipe-tabs"></div>
     <div class="scroll"><table>
@@ -419,7 +412,7 @@
       document.getElementById("foot-count").textContent = ALL.length.toLocaleString();
       renderAll();
       renderScanStatus();
-      pollSweep();
+      pollEval();
     } catch (e) { document.querySelectorAll(".empty").forEach(el=>el.textContent = "core unavailable: "+e); }
   }
 
@@ -594,26 +587,17 @@
   }
   window.hhChip = (k,i)=>{ explore[k].splice(i,1); renderExplore(); };
   window.hhWin = w=>{ explore.window=w; renderExplore(); };
-  let sweepTimer=null, sweepWasRunning=false;
-  function fmtDur(s){ s=Math.max(0,s|0); if(s<60) return s+"s"; if(s<3600) return Math.floor(s/60)+"m"; return Math.floor(s/3600)+"h"+Math.floor((s%3600)/60)+"m"; }
-  async function pollSweep(){
-    clearTimeout(sweepTimer); sweepTimer=null;
-    const line=document.getElementById("sweep-line"); if(!line) return;
-    const bar=document.getElementById("sweep-bar"), startB=document.getElementById("sweep-start"), stopB=document.getElementById("sweep-stop");
+  let evalTimer=null;
+  async function pollEval(){
+    clearTimeout(evalTimer); evalTimer=null;
+    const line=document.getElementById("eval-line"); if(!line) return;
+    const pauseB=document.getElementById("eval-pause");
     let s; try{ s=await fetch("/api/evaluate/status").then(r=>r.json()); }catch(e){ return; }
-    if(s.running){
-      sweepWasRunning=true;
-      const pct=s.total?Math.round(s.processed/s.total*100):0;
-      line.textContent=`${s.scope}: ${s.processed}/${s.total} · ✓${s.evaluated} ✗${s.failed} · ${pct}%${s.etaSec!=null?" · ETA "+fmtDur(s.etaSec):""}`;
-      bar.style.display="block"; bar.firstElementChild.style.width=pct+"%";
-      startB.disabled=true; stopB.style.display="";
-      sweepTimer=setTimeout(pollSweep,3000);
-    } else {
-      startB.disabled=false; stopB.style.display="none";
-      if(s.total>0){ const pct=s.total?Math.round(s.processed/s.total*100):100; line.textContent=`last sweep: ✓${s.evaluated} scored, ✗${s.failed} failed (${s.processed}/${s.total})`; bar.style.display="block"; bar.firstElementChild.style.width=pct+"%"; }
-      else { line.textContent=""; bar.style.display="none"; }
-      if(sweepWasRunning){ sweepWasRunning=false; load(); }
-    }
+    if(!s.llm){ line.textContent="evaluator not configured"; pauseB.style.display="none"; return; }
+    const active=(s.waiting+s.inFlight)>0;
+    line.textContent=`${s.enabled?(active?"● running":"idle"):"paused"} · ${s.workers} workers · queue: ${s.waiting} waiting, ${s.inFlight} in-flight · session ✓${s.doneSession} ✗${s.failedSession}`;
+    pauseB.textContent=s.enabled?"Pause":"Resume";
+    if(document.getElementById("view-pipeline")?.classList.contains("active")) evalTimer=setTimeout(pollEval,4000);
   }
   function relTime(iso){ const t=new Date(iso); if(isNaN(t)) return iso; const s=Math.floor((Date.now()-t)/1000); if(s<60) return s+"s ago"; if(s<3600) return Math.floor(s/60)+"m ago"; if(s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; }
   async function renderScanStatus(){
@@ -705,22 +689,16 @@
     e.target.textContent = (okP && okC) ? "Saved ✓" : "Save failed";
     setTimeout(()=>e.target.textContent="Save profile", 1600);
   };
-  document.getElementById("pipe-eval").onclick = async e => {
-    const btn = e.target; btn.disabled = true; const orig = btn.textContent; btn.textContent = "Evaluating…";
-    try {
-      const r = await fetch("/api/evaluate?limit=10", { method: "POST" });
-      const d = await r.json();
-      if (!r.ok) { btn.textContent = d.error || "failed"; }
-      else { btn.textContent = `✓ ${d.evaluated} scored`; await load(); }
-    } catch (err) { btn.textContent = "error"; }
-    setTimeout(() => { btn.disabled = false; btn.textContent = orig; }, 3500);
+  document.getElementById("eval-pause").onclick = async e => {
+    const resume = e.target.textContent === "Resume"; // currently paused -> resume
+    try { await fetch("/api/evaluate/pause?on=" + (resume ? "true" : "false"), {method:"POST"}); } catch(_){}
+    setTimeout(pollEval, 300);
   };
-  document.getElementById("sweep-start").onclick = async () => {
-    const scope = document.getElementById("sweep-scope").value;
-    try { const r = await fetch("/api/evaluate/sweep?scope="+scope, {method:"POST"}); if(!r.ok){ const d=await r.json().catch(()=>({})); document.getElementById("sweep-line").textContent = d.error||"failed to start"; return; } } catch(e){ return; }
-    pollSweep();
+  document.getElementById("eval-reeval").onclick = async e => {
+    e.target.disabled = true;
+    try { const r = await fetch("/api/evaluate/reeval", {method:"POST"}); const d = await r.json(); document.getElementById("eval-line").textContent = `re-queued ${d.requeued||0} scored jobs`; } catch(_){}
+    setTimeout(()=>{ e.target.disabled = false; pollEval(); }, 600);
   };
-  document.getElementById("sweep-stop").onclick = async () => { try { await fetch("/api/evaluate/stop", {method:"POST"}); } catch(e){}; setTimeout(pollSweep, 400); };
   document.getElementById("q").addEventListener("input", renderPipe);
   document.querySelectorAll("#view-pipeline th.sortable").forEach(th => th.addEventListener("click", () => {
     const c = th.dataset.sort;
@@ -786,7 +764,7 @@
     document.getElementById("view-"+v)?.classList.add("active");
     document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("active", a.dataset.view===v));
     if (v === "explore") renderScanStatus();
-    if (v === "pipeline") pollSweep();
+    if (v === "pipeline") pollEval();
   }
   window.addEventListener("hashchange", route);
   route(); load();

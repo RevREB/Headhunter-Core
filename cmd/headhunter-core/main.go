@@ -70,6 +70,7 @@ func main() {
 		go op.RunTicker(context.Background())
 	}
 	srv := api.New(st, an, llm.FromEnv(), cyc)
+	go srv.RunEvaluator(context.Background()) // persistent inbox consumer (auto A–G)
 	log.Printf("headhunter-core listening on %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
 }
