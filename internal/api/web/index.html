@@ -858,6 +858,7 @@
     const body = document.getElementById("tuning-body"); if(!body) return;
     let t; try { t = (await fetch("/api/tuning").then(r=>r.json())).tuning; } catch(e){ body.innerHTML = `<div class="empty">error loading</div>`; return; }
     const bl = t.belowLine, po = t.passOver;
+    const factorRows = (bl.byFactor||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td><td class="num">${bl.analyzed?Math.round(100*b.count/bl.analyzed):0}%</td></tr>`).join("") || `<tr><td colspan="3" class="empty">no analyzable below-line evals yet — clean the Evaluated tab first</td></tr>`;
     const coRows = (bl.topCompanies||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">none</td></tr>`;
     const reasonRows = (po.byReason||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">no pass-overs recorded yet</td></tr>`;
     body.innerHTML = `
@@ -866,9 +867,11 @@
         <div class="stage"><div class="n">${bl.total}</div><div class="l">below the line</div></div>
         <div class="stage"><div class="n">${po.total}</div><div class="l">pass-overs (above)</div></div>
       </div>
-      <h2 class="sec">Below the line <span class="hint">scored &lt; ${t.minScore} and discarded — signal to tune scans (scraped only: ${bl.scraped})</span></h2>
-      <div class="scroll"><table><thead><tr><th>Company (top sources of below-bar scans)</th><th class="num">Discarded</th></tr></thead><tbody>${coRows}</tbody></table></div>
-      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">Companies flooding the inbox with below-bar roles are candidates to drop from the scan-catalog or narrow with keywords.</p>
+      <h2 class="sec">Why below the line <span class="hint">${bl.total} discarded &lt; ${t.minScore} · ${bl.analyzed} analyzable — the factors that sank them</span></h2>
+      <div class="scroll"><table><thead><tr><th>Factor (from the A–G eval)</th><th class="num">Jobs</th><th class="num">% of analyzed</th></tr></thead><tbody>${factorRows}</tbody></table></div>
+      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">Each factor is a filter you could push upstream — drop onsite/wrong-location roles or below-comp bands at scan time so they never reach the inbox. Factors overlap: one job can miss on several.</p>
+      <h2 class="sec">By company <span class="hint">secondary — some companies just post more; the factors above are the real signal</span></h2>
+      <div class="scroll"><table><thead><tr><th>Company</th><th class="num">Below-line (scraped)</th></tr></thead><tbody>${coRows}</tbody></table></div>
       <h2 class="sec">Pass-overs <span class="hint">scored ≥ ${t.minScore} but you declined — signal to tune the evaluator</span></h2>
       <div class="scroll"><table><thead><tr><th>Reason you passed</th><th class="num">Count</th></tr></thead><tbody>${reasonRows}</tbody></table></div>
       <p class="hint" style="color:var(--muted);margin:.5rem 0 0">These are the evaluator's false positives: it rated them apply-worthy, you didn't. The dominant reasons point at rubric weights (comp, location, company) the A–G prompt should weigh harder.</p>`;

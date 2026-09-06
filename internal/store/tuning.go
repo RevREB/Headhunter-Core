@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"sort"
+)
 
 // Bucket is a labeled count for a tuning breakdown.
 type Bucket struct {
@@ -15,7 +18,9 @@ type TuningReport struct {
 	MinScore  float64 `json:"minScore"`
 	BelowLine struct {
 		Total        int      `json:"total"`
-		Scraped      int      `json:"scraped"` // scraped (scan-actionable) subset
+		Scraped      int      `json:"scraped"`  // scraped (scan-actionable) subset
+		Analyzed     int      `json:"analyzed"` // below-line records with an A–G summary
+		ByFactor     []Bucket `json:"byFactor"` // WHY they missed — the primary signal
 		TopCompanies []Bucket `json:"topCompanies"`
 	} `json:"belowLine"`
 	PassOver struct {
@@ -61,6 +66,68 @@ func (s *Store) DiscardTuning(ctx context.Context, minScore float64) (*TuningRep
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	// WHY below the line — the primary signal. Hard-stop reason codes (unnested
+	// from the A–G summary) plus the soft comp/geo/culture misses. Latest report
+	// per app; report-less below-line records simply aren't factor-analyzable.
+	rep.BelowLine.ByFactor = []Bucket{}
+	label := map[string]string{
+		"onsite_required": "Onsite / wrong location", "heavy_coding_role": "Heavy coding role",
+		"dba_ownership": "DBA / database ownership", "security_below_director": "Security below director",
+		"casino_employer": "Casino employer", "ruled_out_company": "Ruled-out company",
+		"work_auth_blocked": "Work-auth blocked",
+	}
+	hs, err := s.Pool.Query(ctx, `
+		SELECT hs->>'reason_code' AS k, count(*)
+		FROM applications a
+		CROSS JOIN LATERAL (SELECT doc FROM reports rr WHERE rr.application_id=a.id ORDER BY rr.id DESC LIMIT 1) r
+		CROSS JOIN LATERAL jsonb_array_elements(coalesce(r.doc->'summary'->'hard_stops','[]'::jsonb)) hs
+		WHERE a.canonical_id IS NULL AND a.status='discarded' AND a.score IS NOT NULL AND a.score < $1
+		GROUP BY 1 ORDER BY count(*) DESC`, minScore)
+	if err != nil {
+		return nil, err
+	}
+	for hs.Next() {
+		var b Bucket
+		if err := hs.Scan(&b.Key, &b.Count); err != nil {
+			hs.Close()
+			return nil, err
+		}
+		if l, ok := label[b.Key]; ok {
+			b.Key = l
+		}
+		rep.BelowLine.ByFactor = append(rep.BelowLine.ByFactor, b)
+	}
+	hs.Close()
+	if err := hs.Err(); err != nil {
+		return nil, err
+	}
+	// Soft misses from risk_summary (latest report per app; LEFT JOIN so report-less
+	// records still count toward the below-line denominator).
+	var analyzed, compBelow, geoMismatch, culture int
+	if err := s.Pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE r.doc ? 'summary'),
+		       count(*) FILTER (WHERE r.doc->'summary'->'risk_summary'->>'comp_vs_target'='below'),
+		       count(*) FILTER (WHERE r.doc->'summary'->'risk_summary'->>'geo'='mismatch'),
+		       count(*) FILTER (WHERE r.doc->'summary'->'risk_summary'->>'culture' IN ('fail','caution'))
+		FROM applications a
+		LEFT JOIN LATERAL (SELECT doc FROM reports rr WHERE rr.application_id=a.id ORDER BY rr.id DESC LIMIT 1) r ON true
+		WHERE a.canonical_id IS NULL AND a.status='discarded' AND a.score IS NOT NULL AND a.score < $1`, minScore).
+		Scan(&analyzed, &compBelow, &geoMismatch, &culture); err != nil {
+		return nil, err
+	}
+	rep.BelowLine.Analyzed = analyzed
+	for _, sm := range []struct {
+		k string
+		n int
+	}{{"Comp below target", compBelow}, {"Geo mismatch", geoMismatch}, {"Culture concern", culture}} {
+		if sm.n > 0 {
+			rep.BelowLine.ByFactor = append(rep.BelowLine.ByFactor, Bucket{Key: sm.k, Count: sm.n})
+		}
+	}
+	sort.SliceStable(rep.BelowLine.ByFactor, func(i, j int) bool {
+		return rep.BelowLine.ByFactor[i].Count > rep.BelowLine.ByFactor[j].Count
+	})
 
 	// Pass-overs: above the line but discarded, grouped by the human's reason.
 	if err := s.Pool.QueryRow(ctx, `
