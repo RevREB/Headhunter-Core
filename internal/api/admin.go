@@ -5,8 +5,103 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
+
+// cultureStop drops structural words and the ubiquitous eval boilerplate so the
+// tally surfaces the actual culture signals.
+var cultureStop = map[string]bool{
+	"the": true, "and": true, "for": true, "with": true, "not": true, "but": true, "that": true,
+	"this": true, "are": true, "has": true, "was": true, "would": true, "their": true, "its": true,
+	"vs": true, "vs.": true, "from": true, "any": true, "all": true, "may": true, "one": true,
+	"culture": true, "screen": true, "candidate": true, "candidate's": true, "role": true, "roles": true,
+	"caution": true, "fail": true, "pass": true, "signals": true, "signal": true, "job": true, "jd": true,
+	"which": true, "who": true, "than": true, "into": true, "out": true, "over": true, "some": true,
+}
+
+var wordRe = regexp.MustCompile(`[a-z][a-z'-]+`)
+
+func cultureTokens(s string) []string {
+	var out []string
+	for _, w := range wordRe.FindAllString(strings.ToLower(s), -1) {
+		if len(w) >= 3 && !cultureStop[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func topBuckets(m map[string]int, n int) []map[string]any {
+	type kv struct {
+		k string
+		v int
+	}
+	var s []kv
+	for k, v := range m {
+		if v >= 3 { // ignore one-offs
+			s = append(s, kv{k, v})
+		}
+	}
+	sort.Slice(s, func(i, j int) bool {
+		if s[i].v != s[j].v {
+			return s[i].v > s[j].v
+		}
+		return s[i].k < s[j].k
+	})
+	out := []map[string]any{}
+	for i := 0; i < len(s) && i < n; i++ {
+		out = append(out, map[string]any{"key": s[i].k, "count": s[i].v})
+	}
+	return out
+}
+
+// cultureAnalysis empirically summarizes what the culture screen has keyed on:
+// verdict counts, top single terms and two-word phrases across the cited
+// evidence, and a sample of raw notes.
+func (s *Server) cultureAnalysis(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	notes, err := s.Store.CultureNotes(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	uni, bi := map[string]int{}, map[string]int{}
+	fails, cautions, withEvidence := 0, 0, 0
+	samples := []map[string]string{}
+	for _, n := range notes {
+		if n.Verdict == "fail" {
+			fails++
+		} else {
+			cautions++
+		}
+		if n.Evidence == "" {
+			continue
+		}
+		withEvidence++
+		toks := cultureTokens(n.Evidence)
+		for i, t := range toks {
+			uni[t]++
+			if i+1 < len(toks) {
+				bi[t+" "+toks[i+1]]++
+			}
+		}
+		if len(samples) < 50 {
+			samples = append(samples, map[string]string{"verdict": n.Verdict, "company": n.Company, "evidence": n.Evidence})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+		"counts": map[string]int{"total": len(notes), "fail": fails, "caution": cautions, "withEvidence": withEvidence},
+		"topTerms":   topBuckets(uni, 40),
+		"topPhrases": topBuckets(bi, 30),
+		"samples":    samples,
+	})
+}
+
 
 // urlLineRe pulls the JD URL from a career-ops report: the explicit "URL:" line
 // first (most reliable), then the machine-summary `url:` field.
