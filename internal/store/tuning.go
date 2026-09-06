@@ -218,14 +218,24 @@ type ReqRow struct {
 // RequeueBelowLine sends below_bar discards that have a scraped posting back to
 // inbox for re-evaluation under the current rubric, recording the prior score so
 // the lift can be measured. limit<=0 = all. Dry-run unless apply=true.
-func (s *Store) RequeueBelowLine(ctx context.Context, limit int, apply bool) ([]ReqRow, error) {
+func (s *Store) RequeueBelowLine(ctx context.Context, limit int, apply, cultureOnly bool) ([]ReqRow, error) {
+	// cultureOnly isolates the records culture may have unfairly sunk: a scraped
+	// below_bar discard with NO hard stop but a culture caution/fail — the true
+	// test of the defang. Ordered near-line-first so a lift is most visible.
+	join, order := "", " ORDER BY a.id"
 	where := `WHERE a.canonical_id IS NULL AND a.status='discarded' AND a.disposition_reason='below_bar'
 	          AND a.score IS NOT NULL AND EXISTS (SELECT 1 FROM postings p WHERE p.application_id=a.id)`
+	if cultureOnly {
+		join = ` CROSS JOIN LATERAL (SELECT doc FROM reports rr WHERE rr.application_id=a.id ORDER BY rr.id DESC LIMIT 1) r`
+		where += ` AND coalesce(jsonb_array_length(r.doc->'summary'->'hard_stops'),0)=0
+		           AND r.doc->'summary'->'risk_summary'->>'culture' IN ('caution','fail')`
+		order = " ORDER BY a.score DESC"
+	}
 	lim := ""
 	if limit > 0 {
 		lim = " LIMIT " + strconv.Itoa(limit)
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT a.id, a.score::float8 FROM applications a `+where+` ORDER BY a.id`+lim)
+	rows, err := s.Pool.Query(ctx, `SELECT a.id, a.score::float8 FROM applications a`+join+" "+where+order+lim)
 	if err != nil {
 		return nil, err
 	}

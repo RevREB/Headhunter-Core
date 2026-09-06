@@ -219,7 +219,8 @@ func (s *Server) requeueBelowLine(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	apply := r.URL.Query().Get("apply") == "true"
-	rows, err := s.Store.RequeueBelowLine(r.Context(), limit, apply)
+	cultureOnly := r.URL.Query().Get("mode") == "culture"
+	rows, err := s.Store.RequeueBelowLine(r.Context(), limit, apply, cultureOnly)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
