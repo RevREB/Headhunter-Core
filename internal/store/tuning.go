@@ -89,3 +89,54 @@ func (s *Store) DiscardTuning(ctx context.Context, minScore float64) (*TuningRep
 	rrows.Close()
 	return rep, rrows.Err()
 }
+
+// DiscardBelowLine moves canonical 'evaluated' records scoring below minScore to
+// 'discarded' with reason 'below_bar' (a human-invoked bulk classification — the
+// system never does this on its own). Dry-run unless apply=true. Returns count.
+func (s *Store) DiscardBelowLine(ctx context.Context, minScore float64, apply bool) (int, error) {
+	const where = `WHERE canonical_id IS NULL AND status='evaluated' AND score IS NOT NULL AND score < $1`
+	if !apply {
+		var n int
+		if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM applications `+where, minScore).Scan(&n); err != nil {
+			return 0, err
+		}
+		return n, nil
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `SELECT id FROM applications `+where, minScore)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx,
+			`UPDATE applications SET status='discarded'::application_status, disposition_reason='below_bar', updated_at=now() WHERE id=$1`, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO status_events (application_id, from_status, to_status, source, note, at)
+			 VALUES ($1, 'evaluated'::application_status, 'discarded'::application_status, 'tuning', 'below_bar', now())`, id); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}

@@ -263,6 +263,7 @@
       <div id="eval-active" class="chips" style="display:none"></div>
     </div>
     <div class="tabs" id="pipe-tabs"></div>
+    <div id="pipe-actions" style="margin:.5rem 0 0"></div>
     <div class="scroll"><table>
       <thead><tr>
         <th class="sortable" data-sort="company">Company<span class="arr"></span></th>
@@ -517,6 +518,25 @@
     } catch(e){ alert(e); if(btn) btn.disabled=false; }
   };
 
+  async function cleanBelowLine(){
+    const btn = document.getElementById("clean-below"), msg = document.getElementById("clean-below-msg");
+    if (!btn) return;
+    const n = btn.dataset.n || "";
+    if (btn.dataset.armed !== "1") { // first click arms; second confirms
+      btn.dataset.armed = "1"; btn.classList.add("go");
+      btn.textContent = `Confirm — discard ${n} below the line?`;
+      if (msg) msg.textContent = "click again to confirm";
+      return;
+    }
+    btn.disabled = true; btn.textContent = "cleaning…";
+    try {
+      const r = await fetch("/api/applications/discard-below-line?apply=true", { method:"POST" });
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok) { alert(d.error || "clean failed"); btn.disabled=false; btn.dataset.armed="0"; return; }
+      await load(); // re-fetch + re-render; the cleaned rows leave Evaluated
+    } catch(e){ alert(e); btn.disabled=false; }
+  }
+
   function renderAll(){ renderToday(); renderPipe(); renderAnalytics(); renderExplore(); renderPortals(); renderConfig(); renderProfile(); }
 
   function renderToday() {
@@ -556,6 +576,18 @@
     document.getElementById("pipe-tabs").innerHTML = PIPE_TABS.map(t =>
       `<a class="${t===pipeTab?'on':''}" data-tab="${t}">${t.toUpperCase()}<b>${counts[t]||0}</b></a>`).join("");
     document.querySelectorAll("#pipe-tabs a").forEach(a => a.onclick = () => gotoPipeTab(a.dataset.tab));
+
+    // "Clean below the line" — only on the Evaluated tab, only when there's anything to clean.
+    const actions = document.getElementById("pipe-actions");
+    if (actions) {
+      const minScore = (CONFIG.apply_min_score!=null ? Number(CONFIG.apply_min_score) : 3);
+      const belowN = ALL.filter(a=>a.status==="evaluated" && a.score!=null && a.score<minScore).length;
+      actions.innerHTML = (pipeTab==="evaluated" && belowN>0)
+        ? `<button class="btn" id="clean-below" data-armed="0" data-n="${belowN}">Clean below the line (${belowN})</button> <span class="hint" id="clean-below-msg" style="color:var(--muted)">score &lt; ${minScore} → discarded (below_bar); restorable later</span>`
+        : "";
+      const cb = document.getElementById("clean-below");
+      if (cb) cb.onclick = cleanBelowLine;
+    }
 
     // filter + sort
     const q = (document.getElementById("q").value||"").toLowerCase();

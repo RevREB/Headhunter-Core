@@ -84,6 +84,25 @@ func (s *Server) applyMinScore(r *http.Request) float64 {
 	return min
 }
 
+// discardBelowLine bulk-moves evaluated records scoring below apply_min_score to
+// discarded (reason below_bar). A human-invoked UI action (the "Clean below the
+// line" button), consistent with the unguarded per-record discard; dry-run
+// unless ?apply=true so the button can show the count first.
+func (s *Server) discardBelowLine(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	min := s.applyMinScore(r)
+	apply := r.URL.Query().Get("apply") == "true"
+	n, err := s.Store.DiscardBelowLine(r.Context(), min, apply)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "apply": apply, "minScore": min, "discarded": n})
+}
+
 // tuning splits the discard pile into below-the-line (scan-tuning) and pass-overs
 // (rubric-tuning), against the config'd apply_min_score.
 func (s *Server) tuning(w http.ResponseWriter, r *http.Request) {
