@@ -138,6 +138,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/admin/remediate", s.remediate)
 	mux.HandleFunc("GET /api/tuning", s.tuning)
 	mux.HandleFunc("GET /api/tuning/culture", s.cultureAnalysis)
+	mux.HandleFunc("GET /api/tuning/days-listed", s.daysListed)
 	mux.HandleFunc("POST /api/applications/discard-below-line", s.discardBelowLine)
 	mux.HandleFunc("POST /api/admin/requeue-below-line", s.requeueBelowLine)
 	mux.HandleFunc("GET /api/companies", s.companiesList)
@@ -281,6 +282,22 @@ func (s *Server) counts(w http.ResponseWriter, r *http.Request) {
 // sweepPreview validates a candidate sweep_cron expression (standard 5-field)
 // and returns the next 3 fire times (RFC3339, server TZ) so the Config screen
 // can show a live "next runs" preview and reject typos before saving.
+// daysListed returns the per-company "days on board" rollup (a hiring-velocity /
+// req-longevity proxy from disappeared_at − first-seen). Labeled days-listed,
+// not time-to-hire — a delisting isn't proof of a close.
+func (s *Server) daysListed(w http.ResponseWriter, r *http.Request) {
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	rows, err := s.Store.DaysListedByCompany(r.Context(), 200)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "companies": rows})
+}
+
 func (s *Server) sweepPreview(w http.ResponseWriter, r *http.Request) {
 	expr := strings.TrimSpace(r.URL.Query().Get("cron"))
 	if expr == "" {

@@ -382,6 +382,9 @@
         <input type="text" id="cfg-sweep-cron" placeholder="15 */3 * * *" autocomplete="off" spellcheck="false"></div>
       <div class="hint" id="cfg-sweep-preview" style="margin-top:.5rem;color:var(--muted)"></div>
     </div>
+    <h2 class="sec">Listing expiry <span class="hint">detect when a posting leaves the boards</span></h2>
+    <div class="card"><div class="row"><div class="who"><div class="co">Re-probe tracked postings</div><div class="ro">Periodically check each posting URL; after it returns 404/410 twice it's marked <b>listing gone</b> (passive roles move to <b>Expired</b>; active applications keep their status). Feeds the per-company "days listed" stat. Off by default — this makes outbound requests to every tracked URL.</div></div>
+      <div class="toggle" id="cfg-reprobe"><i></i></div></div></div>
     <h2 class="sec">Follow-up cadence <span class="hint">days — the same values the engine uses</span></h2>
     <div class="card pad"><div class="form2" id="cadence"></div>
       <div style="margin-top:1rem"><button class="btn go" id="cfg-save">Save config</button> <span class="hint" id="cfg-saved" style="color:var(--muted)"></span></div>
@@ -398,7 +401,7 @@
 
 <script>
   const FUNNEL = ["evaluated","applied","responded","interview","offer","hired"];
-  const SIDE = ["rejected","discarded","skip"];
+  const SIDE = ["rejected","discarded","skip","expired"];
   const SOURCES = ["Greenhouse","Lever","Ashby","Workday"];
   const WINDOWS = ["24h","3d","7d","14d","30d"];
   const DEF_ROLES = ["Infrastructure","Platform Engineer","Platform Engineering","Site Reliability","SRE","DevOps","DevSecOps","Cloud Engineer","Cloud Architect","Cloud Platform","Kubernetes","Developer Platform"];
@@ -576,7 +579,7 @@
   function gotoPipeTab(tab){ pipeTab = tab; pipeSort = tab === "evaluated" ? { col: "score", dir: -1 } : tab === "inbox" ? { col: "id", dir: 1 } : { col: "createdAt", dir: -1 }; renderPipe(); }
   const avatarSm = co => `<span class="avatar" style="background:hsl(${hue(co)} 45% 38%)">${esc(initials(co))}</span>`;
   function scoreBadge(s){ if(s==null) return '<span class="sc-badge sc-lo">—</span>'; const c = s>=4?"sc-hi":(s>=3?"sc-mid":"sc-lo"); return `<span class="sc-badge ${c}">${s.toFixed(1)}</span>`; }
-  const dotColor = st => ({inbox:"var(--accent)",applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)"}[st]||"var(--muted)");
+  const dotColor = st => ({inbox:"var(--accent)",applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)",expired:"var(--muted)"}[st]||"var(--muted)");
 
   function renderPipe() {
     // header + tabs
@@ -692,7 +695,7 @@
       <div class="hero" style="padding-top:0">
         <div style="display:flex;align-items:center;gap:.8rem">
           ${avatar(d.company)}
-          <div><div class="kicker" style="text-transform:none;letter-spacing:0">${pill(d.status)}${d.imported?` <span class="pill" title="Imported from career-ops — no scraped posting; evaluation is legacy, not native A–G">career-ops import</span>`:""}</div>
+          <div><div class="kicker" style="text-transform:none;letter-spacing:0">${pill(d.status)}${d.imported?` <span class="pill" title="Imported from career-ops — no scraped posting; evaluation is legacy, not native A–G">career-ops import</span>`:""}${d.disappeared_at?` <span class="pill" style="background:var(--muted);color:#fff" title="This posting is gone from the boards (detected ${date(d.disappeared_at)}). For active applications it doesn't change your standing.">listing gone</span>`:""}</div>
           <h1 style="margin:.2rem 0 0">${esc(d.company)}</h1></div>
           <span class="sc-badge ${scCls}" style="margin-left:auto;font-size:1rem;padding:.25rem .6rem">${sc}</span>
         </div>
@@ -790,6 +793,7 @@
     const ms=document.getElementById("cfg-minscore"); if(ms) ms.value = (CONFIG.apply_min_score!=null ? CONFIG.apply_min_score : 3);
     const swT=document.getElementById("cfg-sweep-enabled"); if(swT) swT.classList.toggle("on", CONFIG.sweep_enabled===true);
     const swC=document.getElementById("cfg-sweep-cron"); if(swC){ swC.value = (CONFIG.sweep_cron||""); previewSweepCron(); }
+    const rp=document.getElementById("cfg-reprobe"); if(rp) rp.classList.toggle("on", CONFIG.reprobe_enabled===true);
   }
   // Profile: the search criteria the evaluator reads, plus the résumé. Field
   // values live in config['profile'] (a JSON object) — never in this source.
@@ -865,6 +869,7 @@
     }
   }
   document.getElementById("cfg-sweep-enabled").onclick = e => e.currentTarget.classList.toggle("on");
+  document.getElementById("cfg-reprobe").onclick = e => e.currentTarget.classList.toggle("on");
   document.getElementById("cfg-sweep-cron").addEventListener("input", ()=>{ clearTimeout(sweepPrevTimer); sweepPrevTimer=setTimeout(previewSweepCron, 350); });
   document.getElementById("cfg-save").onclick = async () => {
     const saved=document.getElementById("cfg-saved");
@@ -883,6 +888,7 @@
     saveConfig("apply_min_score", Math.max(0, Math.min(5, Number(document.getElementById("cfg-minscore").value)||3)), null);
     saveConfig("sweep_enabled", swEnabled, null);
     saveConfig("sweep_cron", swCron, null);
+    saveConfig("reprobe_enabled", document.getElementById("cfg-reprobe").classList.contains("on"), null);
   };
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
   document.getElementById("profile-save").onclick = async e => {
@@ -920,6 +926,9 @@
     const factorRows = (bl.byFactor||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td><td class="num">${bl.analyzed?Math.round(100*b.count/bl.analyzed):0}%</td></tr>`).join("") || `<tr><td colspan="3" class="empty">no analyzable below-line evals yet — clean the Evaluated tab first</td></tr>`;
     const coRows = (bl.topCompanies||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">none</td></tr>`;
     const reasonRows = (po.byReason||[]).map(b=>`<tr><td>${esc(b.key)}</td><td class="num">${b.count}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">no pass-overs recorded yet</td></tr>`;
+    let dl=[]; try { dl = (await fetch("/api/tuning/days-listed").then(r=>r.json())).companies||[]; } catch(e){}
+    const fmtD = v => v==null ? "—" : (Math.round(v*10)/10)+"d";
+    const dlRows = dl.map(c=>`<tr><td>${esc(c.company)}</td><td class="num">${c.gone_roles}</td><td class="num">${fmtD(c.median_days)}</td><td class="num">${fmtD(c.avg_days)}</td><td class="num">${c.open_roles}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">no expired listings yet — enable "Listing expiry" in Config to start measuring</td></tr>`;
     body.innerHTML = `
       <div class="funnel" style="margin-bottom:1rem">
         <div class="stage"><div class="n">${t.minScore}</div><div class="l">apply-min line</div></div>
@@ -933,7 +942,10 @@
       <div class="scroll"><table><thead><tr><th>Company</th><th class="num">Below-line (scraped)</th></tr></thead><tbody>${coRows}</tbody></table></div>
       <h2 class="sec">Pass-overs <span class="hint">scored ≥ ${t.minScore} but you declined — signal to tune the evaluator</span></h2>
       <div class="scroll"><table><thead><tr><th>Reason you passed</th><th class="num">Count</th></tr></thead><tbody>${reasonRows}</tbody></table></div>
-      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">These are the evaluator's false positives: it rated them apply-worthy, you didn't. The dominant reasons point at rubric weights (comp, location, company) the A–G prompt should weigh harder.</p>`;
+      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">These are the evaluator's false positives: it rated them apply-worthy, you didn't. The dominant reasons point at rubric weights (comp, location, company) the A–G prompt should weigh harder.</p>
+      <h2 class="sec">Days on board <span class="hint">how long postings stay listed — a hiring-velocity proxy, not time-to-hire</span></h2>
+      <div class="scroll"><table><thead><tr><th>Company</th><th class="num">Gone</th><th class="num">Median</th><th class="num">Avg</th><th class="num">Still open</th></tr></thead><tbody>${dlRows}</tbody></table></div>
+      <p class="hint" style="color:var(--muted);margin:.5rem 0 0">"Days listed" = first sighting → when the posting left the boards. A delisting isn't proof a role was filled — it's how long they leave openings up / collect resumes.</p>`;
   }
 
   // ---- companies ----

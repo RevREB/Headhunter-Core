@@ -71,6 +71,7 @@ func main() {
 	}
 	srv := api.New(st, an, llm.FromEnv(), cyc)
 	go srv.RunEvaluator(context.Background()) // persistent inbox consumer (auto A–G)
+	go srv.RunReprober(context.Background())  // listing-expiry re-probe loop (opt-in via reprobe_enabled)
 	if st != nil {
 		// Backfill company entities from existing applications, then let the
 		// profiler consumer drain unprofiled companies. Backfill runs in the

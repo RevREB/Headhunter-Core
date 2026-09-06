@@ -38,10 +38,11 @@ type StatusEvent struct {
 // latest raw posting, the latest evaluation report, and its status history.
 type ApplicationDetail struct {
 	Application
-	UpdatedAt time.Time       `json:"updatedAt"`
-	Posting   json.RawMessage `json:"posting"` // raw scraped posting doc, or null
-	Report    json.RawMessage `json:"report"`  // latest eval report, or null
-	Events    []StatusEvent   `json:"events"`
+	UpdatedAt     time.Time       `json:"updatedAt"`
+	DisappearedAt *time.Time      `json:"disappeared_at"` // set when the listing was detected gone
+	Posting       json.RawMessage `json:"posting"`        // raw scraped posting doc, or null
+	Report        json.RawMessage `json:"report"`         // latest eval report, or null
+	Events        []StatusEvent   `json:"events"`
 }
 
 // GetApplication returns the full record for one application. Returns
@@ -50,9 +51,9 @@ func (s *Store) GetApplication(ctx context.Context, id int64) (*ApplicationDetai
 	var d ApplicationDetail
 	var score *float64
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, coalesce(url,''), company, role, score::float8, status::text, imported, created_at, updated_at
+		`SELECT id, coalesce(url,''), company, role, score::float8, status::text, imported, created_at, updated_at, disappeared_at
 		 FROM applications WHERE id=$1`, id).
-		Scan(&d.ID, &d.URL, &d.Company, &d.Role, &score, &d.Status, &d.Imported, &d.CreatedAt, &d.UpdatedAt)
+		Scan(&d.ID, &d.URL, &d.Company, &d.Role, &score, &d.Status, &d.Imported, &d.CreatedAt, &d.UpdatedAt, &d.DisappearedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
