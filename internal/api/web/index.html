@@ -266,13 +266,14 @@
     <div id="pipe-actions" style="margin:.5rem 0 0"></div>
     <div class="scroll"><table>
       <thead><tr>
+        <th class="sortable" data-sort="id">ID<span class="arr"></span></th>
         <th class="sortable" data-sort="company">Company<span class="arr"></span></th>
         <th class="sortable" data-sort="role">Role<span class="arr"></span></th>
         <th class="sortable" data-sort="score">Score<span class="arr"></span></th>
         <th class="sortable" data-sort="status">Status<span class="arr"></span></th>
         <th class="sortable" data-sort="createdAt">Date<span class="arr"></span></th>
       </tr></thead>
-      <tbody id="pipe-body"><tr><td colspan="5" class="empty">loading…</td></tr></tbody>
+      <tbody id="pipe-body"><tr><td colspan="6" class="empty">loading…</td></tr></tbody>
     </table></div>
   </section>
 
@@ -560,10 +561,10 @@
         <button class="btn ghost" onclick="hhSet(${a.id},'rejected',this)">Rejected</button></div>`).join("") : `<div class="empty">No applications in flight.</div>`;
   }
   const PIPE_TABS = ["inbox", "all", ...FUNNEL, ...SIDE];
-  let pipeTab = "inbox", pipeSort = { col: "createdAt", dir: -1 };
+  let pipeTab = "inbox", pipeSort = { col: "id", dir: 1 }; // inbox defaults to claim order (id asc = next up)
   // Entering a tab applies its default sort. Evaluated leads with the highest-fit
   // roles (score desc); every other tab defaults to newest-first.
-  function gotoPipeTab(tab){ pipeTab = tab; pipeSort = tab === "evaluated" ? { col: "score", dir: -1 } : { col: "createdAt", dir: -1 }; renderPipe(); }
+  function gotoPipeTab(tab){ pipeTab = tab; pipeSort = tab === "evaluated" ? { col: "score", dir: -1 } : tab === "inbox" ? { col: "id", dir: 1 } : { col: "createdAt", dir: -1 }; renderPipe(); }
   const avatarSm = co => `<span class="avatar" style="background:hsl(${hue(co)} 45% 38%)">${esc(initials(co))}</span>`;
   function scoreBadge(s){ if(s==null) return '<span class="sc-badge sc-lo">—</span>'; const c = s>=4?"sc-hi":(s>=3?"sc-mid":"sc-lo"); return `<span class="sc-badge ${c}">${s.toFixed(1)}</span>`; }
   const dotColor = st => ({inbox:"var(--accent)",applied:"var(--accent)",evaluated:"var(--warn)",responded:"var(--good)",interview:"var(--good)",offer:"var(--good)",hired:"var(--good)",rejected:"var(--bad)",discarded:"var(--bad)",skip:"var(--bad)"}[st]||"var(--muted)");
@@ -595,7 +596,7 @@
     const { col, dir } = pipeSort;
     rows.sort((a,b) => {
       let va = a[col], vb = b[col];
-      if (col === "score") { va = va==null?-1:va; vb = vb==null?-1:vb; }
+      if (col === "score" || col === "id") { va = va==null?-1:va; vb = vb==null?-1:vb; }
       else { va = (va??"").toString().toLowerCase(); vb = (vb??"").toString().toLowerCase(); }
       return (va<vb?-1:va>vb?1:0) * dir;
     });
@@ -604,12 +605,13 @@
     });
     document.getElementById("pipe-body").innerHTML = rows.length ? rows.slice(0,800).map(a=>`
       <tr onclick="location.hash='#job/${a.id}'" title="Open job record">
+        <td class="num" style="color:var(--muted)">${a.id}</td>
         <td><div class="co-cell">${avatarSm(a.company)}<span>${esc(a.company)}</span></div></td>
         <td>${esc(a.role)}</td>
         <td>${scoreBadge(a.score)}</td>
         <td><span class="dot" style="background:${dotColor(a.status)}"></span>${esc(a.status)}</td>
         <td style="white-space:nowrap">${date(a.createdAt)}</td>
-      </tr>`).join("") : `<tr><td colspan="5" class="empty">No matches.</td></tr>`;
+      </tr>`).join("") : `<tr><td colspan="6" class="empty">No matches.</td></tr>`;
   }
   // ---- job detail ----
   const fmtDateTime = s => { if(!s) return ""; const dt = new Date(s); return isNaN(dt) ? s : dt.toLocaleString(); };
