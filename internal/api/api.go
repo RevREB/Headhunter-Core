@@ -854,7 +854,9 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var created, merged, deduped, failed int
+	perATS := map[string]int{}
 	for _, p := range postings {
+		perATS[p.ATS]++
 		normURL := engine.NormalizeURL(p.URL)
 		fp := engine.ContentFingerprint(p.Title, p.Raw)
 		key := engine.DedupKey(p.Company, p.Title)
@@ -863,7 +865,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 			HasLocation: p.Location != "", DescriptionLen: len(p.Raw), PostedWithinDays: -1,
 		})
 		raw, _ := json.Marshal(p)
-		res, err := s.Store.IngestPosting(r.Context(), normURL, "", p.Company, p.Title, key, fp, trust, raw)
+		res, err := s.Store.IngestPosting(r.Context(), normURL, p.ATS, p.Company, p.Title, key, fp, trust, raw)
 		if err != nil {
 			failed++
 			continue
@@ -876,6 +878,9 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 		default:
 			deduped++ // exact-URL re-sighting
 		}
+	}
+	for ats, n := range perATS {
+		_ = s.Store.RecordScanRun(r.Context(), ats, n, true) // per-source scrape ledger (v1.1)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "created": created, "merged": merged, "deduped": deduped, "failed": failed})
 }

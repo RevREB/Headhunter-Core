@@ -5,6 +5,18 @@ import (
 	"fmt"
 )
 
+// RecordScanRun logs a per-source scrape event (scraper contract v1.1): one ATS,
+// N postings ingested this batch. Ground truth for future source-scoped set-diff
+// expiry and per-ATS analytics. No-op for an empty source (a pre-v1.1 scraper).
+func (s *Store) RecordScanRun(ctx context.Context, ats string, postings int, ok bool) error {
+	if ats == "" {
+		return nil
+	}
+	_, err := s.Pool.Exec(ctx,
+		`INSERT INTO scan_runs (ats, postings, ok) VALUES ($1, $2, $3)`, ats, postings, ok)
+	return err
+}
+
 // ProbeTarget is a posting URL to re-probe for disappearance.
 type ProbeTarget struct {
 	ID     int64

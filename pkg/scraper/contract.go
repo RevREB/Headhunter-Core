@@ -1,4 +1,4 @@
-// Package scraper defines the Headhunter ATS scraper wire contract (v1).
+// Package scraper defines the Headhunter ATS scraper wire contract (v1.1).
 //
 // Core owns this package; individual scrapers in RevREB/Headhunter-Scrapers
 // import it. The contract is deliberately tiny: a scraper's ONLY job is to
@@ -11,7 +11,12 @@ import "encoding/json"
 
 // ContractVersion is the semantic version of the scraper wire contract.
 // Core validates a scraper's announced version against this and supports N-1.
-const ContractVersion = "1.0.0"
+//
+// 1.1.0: RawPosting.ATS — scrapers now stamp each posting with the source ATS
+// so Core can attribute sightings per board (per-ATS "days listed" stats and,
+// later, source-scoped set-diff expiry). Additive and backward-compatible: a
+// 1.0 scraper omits it and Core records an empty source.
+const ContractVersion = "1.1.0"
 
 // PortalConfig is the input a scraper receives (via env/args) describing which
 // ATS to fetch and with what query. CredsRef points at a secret reference,
@@ -30,6 +35,7 @@ type RawPosting struct {
 	URL      string          `json:"url"`
 	Title    string          `json:"title"`
 	Company  string          `json:"company"`
+	ATS      string          `json:"ats,omitempty"` // source board/ATS (v1.1); usually PortalConfig.ATS
 	Location string          `json:"location,omitempty"`
 	Comp     string          `json:"comp,omitempty"`
 	PostedAt string          `json:"postedAt,omitempty"` // RFC3339
