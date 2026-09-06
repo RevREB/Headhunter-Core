@@ -23,6 +23,7 @@ import (
 	"github.com/RevREB/Headhunter-Core/internal/importer"
 	"github.com/RevREB/Headhunter-Core/internal/llm"
 	"github.com/RevREB/Headhunter-Core/internal/store"
+	"github.com/robfig/cron/v3"
 	"github.com/RevREB/Headhunter-Core/pkg/scraper"
 )
 
@@ -116,6 +117,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tools", s.tools)
 	mux.HandleFunc("POST /api/tools/{name}", s.callTool)
 	mux.HandleFunc("GET /api/applications", s.listApplications)
+	mux.HandleFunc("GET /api/counts", s.counts)
 	mux.HandleFunc("GET /api/applications/{id}", s.getApplication)
 	mux.HandleFunc("POST /api/applications/{id}/status", s.setStatus)
 	mux.HandleFunc("POST /api/applications/{id}/apply", s.applyJob)
@@ -126,6 +128,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/config/{key}", s.setConfig)
 	mux.HandleFunc("POST /api/cycle", s.cycle)
 	mux.HandleFunc("GET /api/scan/status", s.scanStatus)
+	mux.HandleFunc("GET /api/sweep/preview", s.sweepPreview)
 	mux.HandleFunc("POST /api/scan/dedup", s.dedup)
 	mux.HandleFunc("GET /api/evaluate/status", s.evalStatus)
 	mux.HandleFunc("POST /api/evaluate/pause", s.evalPause)
@@ -249,6 +252,52 @@ func (s *Server) listApplications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applications": apps})
+}
+
+// counts returns live per-status counts (canonical-deduped, same scope as the
+// funnel) plus an "all" total, keyed by status name so the pipeline tab badges
+// can poll it and track live like the evaluator panel.
+func (s *Server) counts(w http.ResponseWriter, r *http.Request) {
+	if s.Analytics == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	f, err := s.Analytics.Funnel(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	total := 0
+	out := map[string]any{"ok": true}
+	for k, v := range f {
+		out[k] = v
+		total += v
+	}
+	out["all"] = total
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sweepPreview validates a candidate sweep_cron expression (standard 5-field)
+// and returns the next 3 fire times (RFC3339, server TZ) so the Config screen
+// can show a live "next runs" preview and reject typos before saving.
+func (s *Server) sweepPreview(w http.ResponseWriter, r *http.Request) {
+	expr := strings.TrimSpace(r.URL.Query().Get("cron"))
+	if expr == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "valid": false, "error": "empty expression"})
+		return
+	}
+	sched, err := cron.ParseStandard(expr)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "valid": false, "error": err.Error()})
+		return
+	}
+	next := make([]string, 0, 3)
+	t := time.Now()
+	for i := 0; i < 3; i++ {
+		t = sched.Next(t)
+		next = append(next, t.Format(time.RFC3339))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "valid": true, "next": next})
 }
 
 func (s *Server) getApplication(w http.ResponseWriter, r *http.Request) {

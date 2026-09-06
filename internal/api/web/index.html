@@ -374,6 +374,14 @@
       <div class="fld"><label>Sweep concurrency</label><div class="d">how many A–G evaluations run in parallel (1–20)</div><input type="number" min="1" max="20" id="cfg-concurrency"></div>
       <div class="fld" style="margin-top:.8rem"><label>Apply minimum score — "the line"</label><div class="d">roles scored below this are <b>below the line</b> (tune what gets scanned); at/above but declined are <b>pass-overs</b> (tune the evaluator). Not an auto-discard — just the classification line. (0–5)</div><input type="number" min="0" max="5" step="0.1" id="cfg-minscore"></div>
     </div>
+    <h2 class="sec">Automatic sweep <span class="hint">cron schedule for scan cycles</span></h2>
+    <div class="card pad">
+      <div class="row"><div class="who"><div class="co">Enable scheduled sweeps</div><div class="ro">Run a scan cycle automatically on the schedule below. Off = manual sweeps only.</div></div>
+        <div class="toggle" id="cfg-sweep-enabled"><i></i></div></div>
+      <div class="fld" style="margin-top:.8rem"><label>Schedule — standard 5-field cron</label><div class="d">minute&nbsp;hour&nbsp;day-of-month&nbsp;month&nbsp;day-of-week (server time, UTC). Example: <code>15 */3 * * *</code> = :15 past every 3rd hour.</div>
+        <input type="text" id="cfg-sweep-cron" placeholder="15 */3 * * *" autocomplete="off" spellcheck="false"></div>
+      <div class="hint" id="cfg-sweep-preview" style="margin-top:.5rem;color:var(--muted)"></div>
+    </div>
     <h2 class="sec">Follow-up cadence <span class="hint">days — the same values the engine uses</span></h2>
     <div class="card pad"><div class="form2" id="cadence"></div>
       <div style="margin-top:1rem"><button class="btn go" id="cfg-save">Save config</button> <span class="hint" id="cfg-saved" style="color:var(--muted)"></span></div>
@@ -562,6 +570,7 @@
   }
   const PIPE_TABS = ["inbox", "all", ...FUNNEL, ...SIDE];
   let pipeTab = "inbox", pipeSort = { col: "id", dir: 1 }; // inbox defaults to claim order (id asc = next up)
+  let COUNTS = null; // live per-status counts from /api/counts (poller-updated); falls back to ALL when null
   // Entering a tab applies its default sort. Evaluated leads with the highest-fit
   // roles (score desc); every other tab defaults to newest-first.
   function gotoPipeTab(tab){ pipeTab = tab; pipeSort = tab === "evaluated" ? { col: "score", dir: -1 } : tab === "inbox" ? { col: "id", dir: 1 } : { col: "createdAt", dir: -1 }; renderPipe(); }
@@ -571,9 +580,10 @@
 
   function renderPipe() {
     // header + tabs
-    document.getElementById("pipe-head").textContent = ALL.length.toLocaleString() + " tracked";
+    const total = COUNTS ? (COUNTS.all||0) : ALL.length;
+    document.getElementById("pipe-head").textContent = total.toLocaleString() + " tracked";
     const counts = {};
-    PIPE_TABS.forEach(t => counts[t] = (t==="all") ? ALL.length : ALL.filter(a=>a.status===t).length);
+    PIPE_TABS.forEach(t => counts[t] = COUNTS ? (COUNTS[t]||0) : ((t==="all") ? ALL.length : ALL.filter(a=>a.status===t).length));
     document.getElementById("pipe-tabs").innerHTML = PIPE_TABS.map(t =>
       `<a class="${t===pipeTab?'on':''}" data-tab="${t}">${t.toUpperCase()}<b>${counts[t]||0}</b></a>`).join("");
     document.querySelectorAll("#pipe-tabs a").forEach(a => a.onclick = () => gotoPipeTab(a.dataset.tab));
@@ -713,9 +723,22 @@
   window.hhChip = (k,i)=>{ explore[k].splice(i,1); renderExplore(); };
   window.hhWin = w=>{ explore.window=w; renderExplore(); };
   let evalTimer=null;
+  // Live pipeline tab counts — polled from /api/counts alongside the evaluator
+  // panel so Inbox/Evaluated/… track live instead of only on page load.
+  async function refreshCounts(){
+    let c; try{ c=await fetch("/api/counts").then(r=>r.json()); }catch(e){ return; }
+    if(!c||!c.ok) return;
+    COUNTS = c;
+    const head=document.getElementById("pipe-head"); if(head) head.textContent=(c.all||0).toLocaleString()+" tracked";
+    document.querySelectorAll("#pipe-tabs a").forEach(a=>{
+      const t=a.dataset.tab, b=a.querySelector("b");
+      if(b) b.textContent = (t==="all") ? (c.all||0) : (c[t]||0);
+    });
+  }
   async function pollEval(){
     clearTimeout(evalTimer); evalTimer=null;
     const line=document.getElementById("eval-line"); if(!line) return;
+    refreshCounts(); // keep pipeline tab badges live alongside the evaluator panel
     const pauseB=document.getElementById("eval-pause");
     const sweepEl=document.getElementById("sweep-line");
     const activeBox=document.getElementById("eval-active");
@@ -765,6 +788,8 @@
     document.getElementById("cadence").innerHTML = CAD.map(c=>`<div class="fld"><label>${c[1]}</label><div class="d">${c[2]}</div><input type="number" min="0" id="cad-${c[0]}" value="${cadence[c[0]]}"></div>`).join("");
     const cc=document.getElementById("cfg-concurrency"); if(cc) cc.value = (CONFIG.eval_concurrency!=null ? CONFIG.eval_concurrency : 6);
     const ms=document.getElementById("cfg-minscore"); if(ms) ms.value = (CONFIG.apply_min_score!=null ? CONFIG.apply_min_score : 3);
+    const swT=document.getElementById("cfg-sweep-enabled"); if(swT) swT.classList.toggle("on", CONFIG.sweep_enabled===true);
+    const swC=document.getElementById("cfg-sweep-cron"); if(swC){ swC.value = (CONFIG.sweep_cron||""); previewSweepCron(); }
   }
   // Profile: the search criteria the evaluator reads, plus the résumé. Field
   // values live in config['profile'] (a JSON object) — never in this source.
@@ -821,11 +846,43 @@
   document.getElementById("scan-refresh").onclick = renderScanStatus;
   document.getElementById("portal-check").onclick = e => { e.target.disabled=true; e.target.textContent="Checking…"; SOURCES.forEach((s,i)=>setTimeout(()=>{const el=document.getElementById("ph-"+s); if(el){el.textContent="reachable";el.style.color="var(--good)";}}, 300*(i+1))); setTimeout(()=>{e.target.disabled=false;e.target.textContent="◎ Check portal health";},300*SOURCES.length+300); };
   document.getElementById("cfg-logos").onclick = e => e.currentTarget.classList.toggle("on");
-  document.getElementById("cfg-save").onclick = () => {
+  // Automatic-sweep cron: validate + preview next runs (server validates via
+  // /api/sweep/preview; we render the times in the viewer's local timezone).
+  let sweepPrevTimer=null;
+  async function previewSweepCron(){
+    const inp=document.getElementById("cfg-sweep-cron"), out=document.getElementById("cfg-sweep-preview");
+    if(!inp||!out) return;
+    const expr=inp.value.trim();
+    if(!expr){ out.textContent="no schedule set — automatic sweeps won't run"; out.style.color="var(--muted)"; return; }
+    let r; try{ r=await fetch("/api/sweep/preview?cron="+encodeURIComponent(expr)).then(x=>x.json()); }catch(e){ return; }
+    if(r && r.valid){
+      const local=(r.next||[]).map(t=>{ const d=new Date(t); return isNaN(d)?t:d.toLocaleString([], {weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); });
+      out.innerHTML="✓ next runs (your local time): "+local.map(x=>`<b style="color:var(--ink)">${esc(x)}</b>`).join(" · ");
+      out.style.color="var(--good)";
+    } else {
+      out.textContent="✗ invalid: "+((r&&r.error)||"bad cron expression");
+      out.style.color="var(--bad)";
+    }
+  }
+  document.getElementById("cfg-sweep-enabled").onclick = e => e.currentTarget.classList.toggle("on");
+  document.getElementById("cfg-sweep-cron").addEventListener("input", ()=>{ clearTimeout(sweepPrevTimer); sweepPrevTimer=setTimeout(previewSweepCron, 350); });
+  document.getElementById("cfg-save").onclick = async () => {
+    const saved=document.getElementById("cfg-saved");
+    const swEnabled=document.getElementById("cfg-sweep-enabled").classList.contains("on");
+    const swCron=document.getElementById("cfg-sweep-cron").value.trim();
+    // Refuse to save an enabled sweep with a bad cron — the operator would just
+    // log and skip it, and the user would think it's scheduled.
+    if(swEnabled && swCron){
+      const chk=await fetch("/api/sweep/preview?cron="+encodeURIComponent(swCron)).then(x=>x.json()).catch(()=>({valid:false}));
+      if(!chk.valid){ if(saved){ saved.textContent="✗ invalid cron — nothing saved"; saved.style.color="var(--bad)"; } return; }
+    }
+    if(saved) saved.style.color="var(--muted)";
     CAD.forEach(c=>cadence[c[0]] = Number(document.getElementById("cad-"+c[0]).value));
-    saveConfig("cadence", cadence, document.getElementById("cfg-saved"));
+    saveConfig("cadence", cadence, saved);
     saveConfig("eval_concurrency", Math.max(1, Math.min(20, Number(document.getElementById("cfg-concurrency").value)||6)), null);
     saveConfig("apply_min_score", Math.max(0, Math.min(5, Number(document.getElementById("cfg-minscore").value)||3)), null);
+    saveConfig("sweep_enabled", swEnabled, null);
+    saveConfig("sweep_cron", swCron, null);
   };
   document.getElementById("cv-src").addEventListener("input", ()=>{ document.getElementById("cv-preview").innerHTML = mdToHtml(document.getElementById("cv-src").value); });
   document.getElementById("profile-save").onclick = async e => {

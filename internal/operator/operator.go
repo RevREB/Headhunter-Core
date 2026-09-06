@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/RevREB/Headhunter-Core/internal/store"
+	"github.com/robfig/cron/v3"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -41,6 +43,7 @@ type Operator struct {
 	catalogPath string
 	ingestURL   string
 	store       *store.Store // for recording/reading scan last-run
+	running     atomic.Bool  // true while a cycle is in flight (sweep overlap guard)
 }
 
 func env(k, def string) string {
@@ -85,6 +88,8 @@ func (o *Operator) loadCatalog() (*Catalog, error) {
 
 // RunCycle launches a Job per catalog scraper. Returns the count launched.
 func (o *Operator) RunCycle(ctx context.Context) (int, error) {
+	o.running.Store(true)
+	defer o.running.Store(false)
 	cat, err := o.loadCatalog()
 	if err != nil {
 		return 0, err
@@ -219,24 +224,82 @@ func (o *Operator) launch(ctx context.Context, sc ScraperDef, keywords string) e
 	return err
 }
 
-// RunTicker runs a cycle every SCAN_INTERVAL (default 6h). Does not fire on
-// startup — the first scheduled scan is one interval after boot.
-func (o *Operator) RunTicker(ctx context.Context) {
-	interval := 6 * time.Hour
-	if d, err := time.ParseDuration(os.Getenv("SCAN_INTERVAL")); err == nil && d > 0 {
-		interval = d
+// sweepSettings reads the automatic-sweep config live: sweep_enabled (default
+// false — opt-in) and sweep_cron (a standard 5-field expression). Read every
+// tick so toggling or editing the schedule takes effect without a redeploy.
+func (o *Operator) sweepSettings(ctx context.Context) (enabled bool, expr string) {
+	if o.store == nil {
+		return false, ""
 	}
-	log.Printf("operator: scheduling a scan cycle every %s", interval)
-	t := time.NewTicker(interval)
+	cfg, err := o.store.GetAllConfig(ctx)
+	if err != nil {
+		return false, ""
+	}
+	if raw, ok := cfg["sweep_enabled"]; ok {
+		var b bool
+		if json.Unmarshal(raw, &b) == nil {
+			enabled = b
+		}
+	}
+	if raw, ok := cfg["sweep_cron"]; ok {
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			expr = s
+		}
+	}
+	return enabled, expr
+}
+
+// RunTicker is the automatic-sweep scheduler. It re-reads sweep_enabled +
+// sweep_cron from config every 30s (so Config-screen changes take effect live)
+// and fires a cycle when the standard 5-field cron expression is due — skipping
+// if the previous cycle is still running. Disabled by default: no sweeps run
+// until the user enables it and sets a valid schedule.
+func (o *Operator) RunTicker(ctx context.Context) {
+	log.Printf("operator: sweep scheduler started (cron-driven via sweep_enabled/sweep_cron)")
+	var (
+		lastExpr string
+		sched    cron.Schedule
+		next     time.Time
+	)
+	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			if _, err := o.RunCycle(ctx); err != nil {
-				log.Printf("operator: scheduled cycle: %v", err)
+		case now := <-t.C:
+			enabled, expr := o.sweepSettings(ctx)
+			if !enabled || expr == "" {
+				lastExpr, sched = "", nil
+				continue
 			}
+			if expr != lastExpr {
+				s, err := cron.ParseStandard(expr)
+				lastExpr = expr // remember even if invalid so we don't re-log every tick
+				if err != nil {
+					log.Printf("operator: invalid sweep_cron %q: %v", expr, err)
+					sched = nil
+					continue
+				}
+				sched = s
+				next = sched.Next(now)
+				log.Printf("operator: sweep enabled %q; next run %s", expr, next.Format(time.RFC3339))
+			}
+			if sched == nil || now.Before(next) {
+				continue
+			}
+			next = sched.Next(now)
+			if o.running.Load() {
+				log.Printf("operator: sweep due but previous cycle still running — skipping")
+				continue
+			}
+			log.Printf("operator: sweep firing; next run %s", next.Format(time.RFC3339))
+			go func() {
+				if _, err := o.RunCycle(ctx); err != nil {
+					log.Printf("operator: scheduled cycle: %v", err)
+				}
+			}()
 		}
 	}
 }
