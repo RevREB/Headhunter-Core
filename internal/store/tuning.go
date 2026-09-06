@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sort"
+	"strconv"
 )
 
 // Bucket is a labeled count for a tuning breakdown.
@@ -206,4 +207,63 @@ func (s *Store) DiscardBelowLine(ctx context.Context, minScore float64, apply bo
 		return 0, err
 	}
 	return len(ids), nil
+}
+
+// ReqRow is a requeued below-line record with the score it had before re-eval.
+type ReqRow struct {
+	ID       int64   `json:"id"`
+	OldScore float64 `json:"oldScore"`
+}
+
+// RequeueBelowLine sends below_bar discards that have a scraped posting back to
+// inbox for re-evaluation under the current rubric, recording the prior score so
+// the lift can be measured. limit<=0 = all. Dry-run unless apply=true.
+func (s *Store) RequeueBelowLine(ctx context.Context, limit int, apply bool) ([]ReqRow, error) {
+	where := `WHERE a.canonical_id IS NULL AND a.status='discarded' AND a.disposition_reason='below_bar'
+	          AND a.score IS NOT NULL AND EXISTS (SELECT 1 FROM postings p WHERE p.application_id=a.id)`
+	lim := ""
+	if limit > 0 {
+		lim = " LIMIT " + strconv.Itoa(limit)
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT a.id, a.score::float8 FROM applications a `+where+` ORDER BY a.id`+lim)
+	if err != nil {
+		return nil, err
+	}
+	var out []ReqRow
+	for rows.Next() {
+		var r ReqRow
+		if err := rows.Scan(&r.ID, &r.OldScore); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !apply {
+		return out, nil
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	for _, r := range out {
+		if _, err := tx.Exec(ctx,
+			`UPDATE applications SET status='inbox'::application_status, score=NULL, eval_claimed_at=NULL, disposition_reason=NULL, updated_at=now() WHERE id=$1`, r.ID); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO status_events (application_id, from_status, to_status, source, note, at)
+			 VALUES ($1,'discarded'::application_status,'inbox'::application_status,'reeval',$2,now())`,
+			r.ID, "below_bar re-test; prior score "+strconv.FormatFloat(r.OldScore, 'f', 1, 64)); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

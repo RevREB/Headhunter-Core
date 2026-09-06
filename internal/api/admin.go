@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -196,6 +197,34 @@ func (s *Server) discardBelowLine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "apply": apply, "minScore": min, "discarded": n})
+}
+
+// requeueBelowLine sends below_bar discards (scraped, factor-analyzable) back to
+// inbox for re-evaluation under the current rubric, to measure whether the
+// culture defang lifts scores. IMPORT_TOKEN-guarded; dry-run unless ?apply=true;
+// ?limit=N to sample. Returns the requeued ids + their prior scores.
+func (s *Server) requeueBelowLine(w http.ResponseWriter, r *http.Request) {
+	if os.Getenv("IMPORT_TOKEN") == "" || r.Header.Get("X-Import-Token") != os.Getenv("IMPORT_TOKEN") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if s.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no database"})
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	apply := r.URL.Query().Get("apply") == "true"
+	rows, err := s.Store.RequeueBelowLine(r.Context(), limit, apply)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "apply": apply, "count": len(rows), "rows": rows})
 }
 
 // tuning splits the discard pile into below-the-line (scan-tuning) and pass-overs

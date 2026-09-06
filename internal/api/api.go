@@ -135,6 +135,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/tuning", s.tuning)
 	mux.HandleFunc("GET /api/tuning/culture", s.cultureAnalysis)
 	mux.HandleFunc("POST /api/applications/discard-below-line", s.discardBelowLine)
+	mux.HandleFunc("POST /api/admin/requeue-below-line", s.requeueBelowLine)
 	mux.HandleFunc("GET /api/companies", s.companiesList)
 	mux.HandleFunc("GET /api/companies/profile/status", s.profileStatus)
 	mux.HandleFunc("POST /api/companies/profile/pause", s.profilePause)
