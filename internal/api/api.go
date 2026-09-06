@@ -116,6 +116,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /api/tools", s.tools)
 	mux.HandleFunc("POST /api/tools/{name}", s.callTool)
+	mux.HandleFunc("POST /mcp", s.mcp) // read-only MCP front door (JSON-RPC), fronted by Bifrost as "headhunter"
 	mux.HandleFunc("GET /api/applications", s.listApplications)
 	mux.HandleFunc("GET /api/counts", s.counts)
 	mux.HandleFunc("GET /api/applications/{id}", s.getApplication)
