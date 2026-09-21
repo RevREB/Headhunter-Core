@@ -23,8 +23,8 @@ import (
 	"github.com/RevREB/Headhunter-Core/internal/importer"
 	"github.com/RevREB/Headhunter-Core/internal/llm"
 	"github.com/RevREB/Headhunter-Core/internal/store"
-	"github.com/robfig/cron/v3"
 	"github.com/RevREB/Headhunter-Core/pkg/scraper"
+	"github.com/robfig/cron/v3"
 )
 
 //go:embed web

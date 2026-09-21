@@ -180,16 +180,16 @@ func (s *Store) SaveCompanyProfile(ctx context.Context, id int64, profile []byte
 
 // CompanyRow is a company list entry with rolled-up posting stats.
 type CompanyRow struct {
-	ID         int64    `json:"id"`
-	Name       string   `json:"name"`
-	Domain     string   `json:"domain,omitempty"`
-	Flags      []string `json:"flags,omitempty"`
-	Postings   int      `json:"postings"`
-	AvgScore   *float64 `json:"avgScore,omitempty"`
-	Profiled   bool     `json:"profiled"`
-	Size       string   `json:"size,omitempty"`
-	Stage      string   `json:"stage,omitempty"`
-	ATS        string   `json:"ats,omitempty"`
+	ID       int64    `json:"id"`
+	Name     string   `json:"name"`
+	Domain   string   `json:"domain,omitempty"`
+	Flags    []string `json:"flags,omitempty"`
+	Postings int      `json:"postings"`
+	AvgScore *float64 `json:"avgScore,omitempty"`
+	Profiled bool     `json:"profiled"`
+	Size     string   `json:"size,omitempty"`
+	Stage    string   `json:"stage,omitempty"`
+	ATS      string   `json:"ats,omitempty"`
 }
 
 // ListCompanies returns companies with posting counts and average score,
@@ -226,13 +226,13 @@ func (s *Store) ListCompanies(ctx context.Context) ([]CompanyRow, error) {
 
 // CompanyDetail is a company profile plus its postings.
 type CompanyDetail struct {
-	ID       int64           `json:"id"`
-	Name     string          `json:"name"`
-	Norm     string          `json:"norm"`
-	Domain   string          `json:"domain,omitempty"`
-	Flags    []string        `json:"flags,omitempty"`
-	Profiled bool            `json:"profiled"`
-	Profile  json.RawMessage `json:"profile"`
+	ID       int64            `json:"id"`
+	Name     string           `json:"name"`
+	Norm     string           `json:"norm"`
+	Domain   string           `json:"domain,omitempty"`
+	Flags    []string         `json:"flags,omitempty"`
+	Profiled bool             `json:"profiled"`
+	Profile  json.RawMessage  `json:"profile"`
 	Postings []CompanyPosting `json:"postings"`
 }
 

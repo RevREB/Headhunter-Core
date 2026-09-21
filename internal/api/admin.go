@@ -95,14 +95,13 @@ func (s *Server) cultureAnalysis(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true,
-		"counts": map[string]int{"total": len(notes), "fail": fails, "caution": cautions, "withEvidence": withEvidence},
+		"ok":         true,
+		"counts":     map[string]int{"total": len(notes), "fail": fails, "caution": cautions, "withEvidence": withEvidence},
 		"topTerms":   topBuckets(uni, 40),
 		"topPhrases": topBuckets(bi, 30),
 		"samples":    samples,
 	})
 }
-
 
 // urlLineRe pulls the JD URL from a career-ops report: the explicit "URL:" line
 // first (most reliable), then the machine-summary `url:` field.

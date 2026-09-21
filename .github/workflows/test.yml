@@ -1,0 +1,176 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: vet + build + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: gofmt
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files; run 'gofmt -w .'"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+          echo "all Go files are gofmt-clean"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -short -count=1 ./...
+
+  migrations:
+    name: migrations + boot smoke (postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: headhunter
+          POSTGRES_PASSWORD: headhunter
+          POSTGRES_DB: headhunter
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U headhunter -d headhunter"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # main.go reads DATABASE_URL / LISTEN_ADDR — these are the binary's own
+      # variables, not CI-invented ones.
+      DATABASE_URL: postgres://headhunter:headhunter@127.0.0.1:5432/headhunter?sslmode=disable
+      LISTEN_ADDR: 127.0.0.1:8080
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: headhunter
+      PGPASSWORD: headhunter
+      PGDATABASE: headhunter
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Ensure psql client
+        run: command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client; }
+
+      - name: Build binary
+        run: go build -o /tmp/headhunter-core ./cmd/headhunter-core
+
+      - name: First boot — apply embedded migrations
+        run: |
+          set -euo pipefail
+          /tmp/headhunter-core >/tmp/boot1.log 2>&1 &
+          echo $! >/tmp/hh1.pid
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then up=1; break; fi
+            if ! kill -0 "$(cat /tmp/hh1.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::headhunter-core did not become healthy (migrate failure or crash)"
+            cat /tmp/boot1.log
+            exit 1
+          fi
+          cat /tmp/boot1.log
+
+      - name: Assert every migration file was applied
+        run: |
+          set -euo pipefail
+          on_disk=$(ls -1 internal/store/migrations/*.sql | wc -l | tr -d ' ')
+          applied=$(psql -tAc 'SELECT count(*) FROM schema_migrations')
+          echo "migrations on disk: $on_disk, recorded applied: $applied"
+          if [ "$on_disk" != "$applied" ]; then
+            echo "::error::schema_migrations has $applied rows but $on_disk migration files exist"
+            psql -c 'SELECT version, applied_at FROM schema_migrations ORDER BY version'
+            exit 1
+          fi
+
+      - name: Assert core schema objects exist
+        run: |
+          set -euo pipefail
+          for tbl in applications status_events schema_migrations; do
+            present=$(psql -tAc "SELECT to_regclass('public.$tbl') IS NOT NULL")
+            if [ "$present" != "t" ]; then
+              echo "::error::expected table $tbl to exist after migration"
+              psql -c '\dt'
+              exit 1
+            fi
+            echo "table $tbl present"
+          done
+
+      - name: Assert a DB-backed endpoint serves against the migrated schema
+        run: |
+          set -euo pipefail
+          body=$(curl -fsS http://127.0.0.1:8080/api/counts)
+          echo "$body"
+          echo "$body" | grep -q '"ok":true' || {
+            echo "::error::/api/counts did not report ok:true against the freshly migrated schema"
+            exit 1
+          }
+
+      - name: Second boot — migrations must be idempotent
+        run: |
+          set -euo pipefail
+          kill "$(cat /tmp/hh1.pid)" 2>/dev/null || true
+          sleep 2
+          before=$(psql -tAc 'SELECT count(*) FROM schema_migrations')
+          /tmp/headhunter-core >/tmp/boot2.log 2>&1 &
+          echo $! >/tmp/hh2.pid
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then up=1; break; fi
+            if ! kill -0 "$(cat /tmp/hh2.pid)" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "::error::second boot against an already-migrated database failed"
+            cat /tmp/boot2.log
+            exit 1
+          fi
+          after=$(psql -tAc 'SELECT count(*) FROM schema_migrations')
+          echo "schema_migrations before=$before after=$after"
+          if [ "$before" != "$after" ]; then
+            echo "::error::re-running migrations changed schema_migrations ($before -> $after); not idempotent"
+            exit 1
+          fi
+          kill "$(cat /tmp/hh2.pid)" 2>/dev/null || true
+
+      - name: Server logs
+        if: always()
+        run: |
+          echo '--- boot 1 ---'; cat /tmp/boot1.log 2>/dev/null || true
+          echo '--- boot 2 ---'; cat /tmp/boot2.log 2>/dev/null || true

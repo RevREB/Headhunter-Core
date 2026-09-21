@@ -15,11 +15,11 @@ type IntegrityReport struct {
 		ReportMarkdownOnly int `json:"reportMarkdownOnly"` // imported career-ops report (no summary)
 	} `json:"shapes"`
 	Defects struct {
-		EvaluatedNoReport      int `json:"evaluatedNoReport"`      // status=evaluated but no report row
-		EvaluatedURLEmpty      int `json:"evaluatedUrlEmpty"`      // status=evaluated but no URL
+		EvaluatedNoReport       int `json:"evaluatedNoReport"` // status=evaluated but no report row
+		EvaluatedURLEmpty       int `json:"evaluatedUrlEmpty"` // status=evaluated but no URL
 		EvaluatedPostingMissing int `json:"evaluatedPostingMissing"`
-		ScoredNoReport         int `json:"scoredNoReport"`         // has a score but no report
-		URLEmptyButInReport    int `json:"urlEmptyButInReport"`    // url empty yet a URL is recoverable from the report
+		ScoredNoReport          int `json:"scoredNoReport"`      // has a score but no report
+		URLEmptyButInReport     int `json:"urlEmptyButInReport"` // url empty yet a URL is recoverable from the report
 	} `json:"defects"`
 }
 
